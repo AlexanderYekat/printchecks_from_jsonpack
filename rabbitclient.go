@@ -13,11 +13,12 @@ import (
 	"strings"
 )
 
-var DIROFJSONS = "./jsons/"
+var DIROFJSONS = "./jsons/works/"
 
-var dirOfjsons = flag.String("dirjsons", "./jsons/", "директория json файлов по умолчанию ./jsons/")
+var dirOfjsons = flag.String("dirjsons", "./jsons/works/", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
 var commandForAction = flag.String("command", "update", "команда")
+var debugpr = flag.Bool("debug", true, "дебажим программу по умолчанию false")
 
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
@@ -29,7 +30,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2023_12_25_01"
+const Version_of_program = "2023_12_28_01"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -38,9 +39,9 @@ func main() {
 	var err error
 	var descrError string
 
-	runDescription := "программа версии " + Version_of_program + " парсинга лог файлов драйвера атол запущена"
+	runDescription := "программа версии " + Version_of_program + " распечатка чеков из json заданий запущена"
 	fmt.Println(runDescription)
-	defer fmt.Println("программа версии " + Version_of_program + " парсинга лог файлов драйвера атол остановлена")
+	defer fmt.Println("программа версии " + Version_of_program + " распечатка чеков из json заданий остановлена")
 
 	fmt.Println("парсинг параметров запуска программы")
 	flag.Parse()
@@ -124,16 +125,20 @@ func main() {
 		log.Fatal(desrErr)
 	}
 	if !connectWithKassa(fptr, comPort) {
-		descrErr := "ошибка сокдинения с кассовым аппаратом"
+		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом на ком порт %v", comPort)
 		logsmap[LOGERROR].Println(descrErr)
-		log.Fatal(descrErr)
+		if !*debugpr {
+			log.Fatal(descrErr)
+		}
+	} else {
+		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", comPort)
 	}
 	defer fptr.Close()
 	//jsonAnswer, err := sendComandeAndGetAnswerFromKKT(fptr, string(d.Body))
 	//jsonAnswer, err := sendComandeAndGetAnswerFromKKT(fptr, "{\"type\": \"openShift\"}")
 	//fmt.Println(jsonAnswer)
 	//инициализация файла напечтанных чеков
-	logsmap[LOGINFO_WITHSTD].Println("отрытик для записи таблицы напечатанных чеков")
+	logsmap[LOGINFO_WITHSTD].Println("отрытие для записи таблицы напечатанных чеков")
 	flagsTempOpen := os.O_APPEND | os.O_CREATE | os.O_WRONLY
 	file_printed_checks, err := os.OpenFile(DIROFJSONS+"\\"+FILE_NAME_PRINTED_CHECKS, flagsTempOpen, 0644)
 	if err != nil {
@@ -144,6 +149,7 @@ func main() {
 	defer file_printed_checks.Close()
 
 	//перебор json занаий и обработка
+	countPrintedChecks := 0
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
 	for k, currFullFileName := range listOfFiles {
@@ -157,25 +163,40 @@ func main() {
 		}
 		resulOfCommand, err := sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
 		if err != nil {
-			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", descrpErr, currFullFileName)
+			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 			continue
 		}
 		if successCommand(resulOfCommand) {
 			//при успешной печати чека, записываем данные о номере напечатнного чека
-			file_printed_checks.WriteString(currNumIsprChecka)
+			countPrintedChecks++
+			if countPrintedChecks == 1 {
+				file_printed_checks.WriteString("\n")
+			}
+			file_printed_checks.WriteString(currNumIsprChecka + "\n")
 		}
 	}
+	logsmap[LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
 	//обработка лог файла
-	log.Fatal("штатный выход")
+	//log.Fatal("штатный выход")
 }
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
 	//return "", nil
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
 	//fptr.ValidateJson()
-	fptr.ProcessJson()
+	err := fptr.ProcessJson()
+	if err != nil {
+		if !*debugpr {
+			desrError := fmt.Sprintf("ошибка (%v) печати чека коррекции на кассовом аппарате", err)
+			logsmap[LOGERROR].Println(desrError)
+			return desrError, err
+		}
+	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
+	//if *debugpr {
+
+	//}
 	//result := "{\"result\": \"all ok\"}"
 	return result, nil
 }
@@ -286,7 +307,7 @@ func getFDFromFileName(fileNameOfJson string) string {
 	return fd
 }
 
-func readJsonFromFile(currFullFileName string) (string, err) {
+func readJsonFromFile(currFullFileName string) (string, error) {
 	plan, err := ioutil.ReadFile(currFullFileName)
 	return string(plan), err
 }
@@ -323,4 +344,27 @@ func getCurrentPortOfKass(dirOfJsons string) (string, error) {
 		return desrError, err
 	}
 	return string(comportb), nil
+}
+
+func intitLog(logFile string, pref string, clearLogs bool) (*os.File, *log.Logger, error) {
+	flagsTempOpen := os.O_APPEND | os.O_CREATE | os.O_WRONLY
+	if clearLogs {
+		flagsTempOpen = os.O_TRUNC | os.O_CREATE | os.O_WRONLY
+	}
+	f, err := os.OpenFile(logFile, flagsTempOpen, 0644)
+	multwr := io.MultiWriter(f)
+	//if pref == LOG_PREFIX+"_INFO" {
+	//	multwr = io.MultiWriter(f, os.Stdout)
+	//}
+	flagsLogs := log.LstdFlags
+	if pref == LOG_PREFIX+"_ERROR" {
+		multwr = io.MultiWriter(f, os.Stderr)
+		flagsLogs = log.LstdFlags | log.Lshortfile
+	}
+	if err != nil {
+		fmt.Println("Не удалось создать лог файл ", logFile, err)
+		return nil, nil, err
+	}
+	loger := log.New(multwr, pref+" ", flagsLogs)
+	return f, loger, nil
 }
