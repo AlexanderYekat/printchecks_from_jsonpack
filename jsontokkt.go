@@ -13,11 +13,10 @@ import (
 	"strings"
 )
 
-var DIROFJSONS = "./jsons/works/"
+var DIROFJSONS = ".\\jsons\\works\\"
 
-var dirOfjsons = flag.String("dirjsons", "./jsons/works/", "директория json файлов по умолчанию ./jsons/")
+var dirOfjsons = flag.String("dirjsons", ".\\jsons\\works\\", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
-var commandForAction = flag.String("command", "update", "команда")
 var debugpr = flag.Bool("debug", false, "дебажим программу")
 var emulation = flag.Bool("emul", false, "эмуляция")
 
@@ -31,7 +30,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2023_12_29_05"
+const Version_of_program = "2024_01_30_02"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -67,9 +66,12 @@ func main() {
 			}
 		}
 	}()
+	input := bufio.NewScanner(os.Stdin)
 	if err != nil {
 		descrMistake := fmt.Sprintf("ошибка инициализации лог файлов %v", descrError)
 		fmt.Fprint(os.Stderr, descrMistake)
+		println("Нажмите любую клавишу...")
+		input.Scan()
 		log.Panic(descrMistake)
 	}
 	fmt.Println("лог файлы инициализированы в папке " + LOGSDIR)
@@ -83,7 +85,9 @@ func main() {
 		err := os.Mkdir(DIROFJSONS, 0777)
 		descrError := fmt.Sprintf("ошибка (%v) чтения директории %v с json заданиямию", err, DIROFJSONS)
 		logsmap[LOGERROR].Println(descrError)
-		log.Fatal(descrError)
+		println("Нажмите любую клавишу...")
+		input.Scan()
+		log.Panic(descrError)
 	}
 
 	listOfFilesTempr, err := listDirByReadDir(DIROFJSONS)
@@ -96,7 +100,7 @@ func main() {
 	logsmap[LOGINFO_WITHSTD].Println("Всего json файлов", countOfFiles)
 	//перебор всех файлов
 	for k, v := range listOfFilesTempr {
-		currFullFileName := DIROFJSONS + "\\" + v
+		currFullFileName := DIROFJSONS + v
 		numChecka := getFDFromFileName(v)
 		printedThisCheck := false
 		if numChecka != "" {
@@ -115,7 +119,9 @@ func main() {
 	if err != nil {
 		descrError := fmt.Sprintf("Ошибка (%v) инициализации драйвера ККТ атол", err)
 		logsmap[LOGERROR].Println(descrError)
-		log.Fatal(descrError)
+		println("Нажмите любую клавишу...")
+		input.Scan()
+		log.Panic(descrError)
 	}
 	defer fptr.Destroy()
 	fmt.Println(fptr.Version())
@@ -125,13 +131,17 @@ func main() {
 	if err != nil {
 		desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
 		logsmap[LOGERROR].Println(desrErr)
-		log.Fatal(desrErr)
+		println("Нажмите любую клавишу...")
+		input.Scan()
+		log.Panic(desrErr)
 	}
 	if !connectWithKassa(fptr, comPort) {
 		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом на ком порт %v", comPort)
 		logsmap[LOGERROR].Println(descrErr)
 		if !*debugpr {
-			log.Fatal(descrErr)
+			println("Нажмите любую клавишу...")
+			input.Scan()
+			log.Panic(descrErr)
 		}
 	} else {
 		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", comPort)
@@ -143,10 +153,12 @@ func main() {
 	//инициализация файла напечтанных чеков
 	logsmap[LOGINFO_WITHSTD].Println("отрытие для записи таблицы напечатанных чеков")
 	flagsTempOpen := os.O_APPEND | os.O_CREATE | os.O_WRONLY
-	file_printed_checks, err := os.OpenFile(DIROFJSONS+"\\"+FILE_NAME_PRINTED_CHECKS, flagsTempOpen, 0644)
+	file_printed_checks, err := os.OpenFile(DIROFJSONS+FILE_NAME_PRINTED_CHECKS, flagsTempOpen, 0644)
 	if err != nil {
 		descrError := fmt.Sprintf("ошибка создания файла напечатанных чеков %v", err)
 		logsmap[LOGERROR].Println(descrError)
+		println("Нажмите любую клавишу...")
+		input.Scan()
 		log.Panic("ошибка инициализации напечтанных файла чеков", descrError)
 	}
 	defer file_printed_checks.Close()
@@ -186,6 +198,8 @@ func main() {
 	logsmap[LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
 	//обработка лог файла
 	//log.Fatal("штатный выход")
+	println("Нажмите любую клавишу...")
+	input.Scan()
 }
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
@@ -289,7 +303,7 @@ func initializationLogs(clearLogs bool, logstrs ...string) (map[string]*os.File,
 func printedCheck(dirjsons, numerChecka string) (bool, error) {
 	//file_printed_checks, err := os.OpenFile(DIROFJSONS+"\\"+FILE_NAME_PRINTED_CHECKS, flagsTempOpen)
 	res := false
-	file_printed_checks, err := os.Open(DIROFJSONS + "\\" + FILE_NAME_PRINTED_CHECKS)
+	file_printed_checks, err := os.Open(DIROFJSONS + FILE_NAME_PRINTED_CHECKS)
 	if err != nil {
 		return res, err
 	}
@@ -355,7 +369,7 @@ func connectWithKassa(fptr *fptr10.IFptr, comport string) bool {
 }
 
 func getCurrentPortOfKass(dirOfJsons string) (string, error) {
-	comportb, err := os.ReadFile(dirOfJsons + "\\" + FILE_NAME_CONNECTION)
+	comportb, err := os.ReadFile(dirOfJsons + FILE_NAME_CONNECTION)
 	if err != nil {
 		desrError := fmt.Sprintf("ошибка (%v) октрытия файла с параметрами соедиения кассы", err)
 		logsmap[LOGERROR].Println(desrError)
