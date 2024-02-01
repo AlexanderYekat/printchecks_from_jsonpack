@@ -4,6 +4,7 @@ import (
 	"bufio"
 	fptr10 "clientrabbit/fptr"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -133,8 +134,10 @@ var DIROFJSONS = ".\\jsons\\works\\"
 
 var dirOfjsons = flag.String("dirjsons", ".\\jsons\\works\\", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
-var debugpr = flag.Bool("debug", false, "дебажим программу")
+var debugpr = flag.Bool("debug1", false, "дебажим программу")
+var debug = flag.Bool("debug2", false, "режим отладки")
 var emulation = flag.Bool("emul", false, "эмуляция")
+var countOfCheckingMarks = flag.Int("attempts", 10, "число попыток провекри марки")
 
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
@@ -146,7 +149,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_01_31_01"
+const Version_of_program = "2024_02_01_02"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -154,8 +157,6 @@ const FILE_NAME_CONNECTION = "connection.txt"
 func main() {
 	var err error
 	var descrError string
-	var imcResultCheckin TItemInfoCheckResult
-	var answerOfCheckMark TAnsweChekcMark
 
 	runDescription := "программа версии " + Version_of_program + " распечатка чеков из json заданий запущена"
 	fmt.Println(runDescription)
@@ -165,21 +166,18 @@ func main() {
 	flag.Parse()
 	fmt.Println("emulation", *emulation)
 	fmt.Println("debugpr", *debugpr)
+	fmt.Println("debug: ", *debug)
 	clearLogsDescr := fmt.Sprintf("Очистить логи программы %v", *clearLogsProgramm)
 	fmt.Println(clearLogsDescr)
 	fmt.Println("инициализация лог файлов программы")
 	if foundedLogDir, _ := doesFileExist(LOGSDIR); !foundedLogDir {
 		os.Mkdir(LOGSDIR, 0777)
 	}
-	//if foundedLogDir, _ := doesFileExist(RESULTSDIR); !foundedLogDir {
-	//	os.Mkdir(RESULTSDIR, 0777)
-	//}
 	filelogmap, logsmap, descrError, err = initializationLogs(*clearLogsProgramm, LOGINFO, LOGERROR, LOGSKIP_LINES, LOGOTHER)
 	defer func() {
 		fmt.Println("закрытие дескрипторов лог файлов программы")
 		for _, v := range filelogmap {
 			if v != nil {
-				//fmt.Println("close", k, v)
 				v.Close()
 			}
 		}
@@ -195,9 +193,9 @@ func main() {
 	fmt.Println("лог файлы инициализированы в папке " + LOGSDIR)
 	multwriterLocLoc := io.MultiWriter(logsmap[LOGINFO].Writer(), os.Stdout)
 	logsmap[LOGINFO_WITHSTD] = log.New(multwriterLocLoc, LOG_PREFIX+"_"+strings.ToUpper(LOGINFO)+" ", log.LstdFlags)
-	logsmap[LOGINFO].Println(runDescription)
-	logsmap[LOGINFO].Println(clearLogsDescr)
-
+	logginInFile(runDescription)
+	logginInFile(clearLogsDescr)
+	//
 	DIROFJSONS = *dirOfjsons
 	if foundedLogDir, _ := doesFileExist(DIROFJSONS); !foundedLogDir {
 		err := os.Mkdir(DIROFJSONS, 0777)
@@ -217,19 +215,21 @@ func main() {
 	countOfFiles := len(listOfFilesTempr)
 	logsmap[LOGINFO_WITHSTD].Println("Всего json файлов", countOfFiles)
 	//перебор всех файлов
-	for k, v := range listOfFilesTempr {
+	for _, v := range listOfFilesTempr {
 		currFullFileName := DIROFJSONS + v
 		numChecka := getFDFromFileName(v)
 		printedThisCheck := false
-		if numChecka != "" {
-			printedThisCheck, _ = printedCheck(DIROFJSONS, numChecka)
+		if numChecka == "" {
+			logsmap[LOGERROR].Printf("пропущен файл %v", currFullFileName)
+			continue
 		}
+		printedThisCheck, _ = printedCheck(DIROFJSONS, numChecka)
 		if printedThisCheck {
 			logsmap[LOGINFO_WITHSTD].Printf("чек с номером %v уже был распечатан", numChecka)
 			continue
 		}
 		listOfFiles = append(listOfFiles, currFullFileName)
-		logsmap[LOGINFO_WITHSTD].Printf("%v = %v\n", k+1, currFullFileName)
+		//logsmap[LOGINFO_WITHSTD].Printf("%v = %v\n", k+1, currFullFileName)
 	}
 	countOfFiles = len(listOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("инициализация драйвера атол")
@@ -281,7 +281,7 @@ func main() {
 	}
 	defer file_printed_checks.Close()
 
-	//перебор json занаий и обработка
+	//перебор json заданаий и обработка
 	countPrintedChecks := 0
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
@@ -289,102 +289,94 @@ func main() {
 		var receipt TCorrectionCheck
 		currNumIsprChecka := getFDFromFileName(currFullFileName)
 		logsmap[LOGINFO_WITHSTD].Printf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName)
-		logsmap[LOGINFO].Printf("начинаем читать json файл %v", currFullFileName)
+		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
+		logginInFile(logstr)
 		jsonCorrection, err := readJsonFromFile(currFullFileName)
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) чтения json задания чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 			continue
 		}
-		logsmap[LOGINFO].Printf("прочитали json файл %v", currFullFileName)
-		//проверяем есть в чеке марки
+		logstr = fmt.Sprintf("прочитали json файл %v", currFullFileName)
+		logginInFile(logstr)
+		//ищем марки в чеке
+		logginInFile("ищем марки в чеке")
+		existMarksInCheck := false
 		err = json.Unmarshal([]byte(jsonCorrection), &receipt)
 		if err != nil {
-			errorDescr := fmt.Sprintf("ошибка (%v) парсинга json задания чека %v атол", err, currFullFileName)
+			errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) json задания чека %v атол", err, jsonCorrection, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 			continue
 		}
+		mistakeChechingMark := false
 		for _, v := range receipt.Items {
-			typeItem := v.(TGenearaPosAndTag11921191).Type
+			typeItem := v.(map[string]interface{})["type"]
 			if typeItem != "position" {
 				continue
+
 			}
-			currPos := v.(TPosition)
-			if currPos.ImcParams == nil {
+			currMarkBase64interface, ok := v.(map[string]interface{})["mark"]
+			if !ok {
 				continue
 			}
-			currMarkBase64 := currPos.ImcParams.Imc
-			resJson, err := sendCheckOfMark(fptr, currMarkBase64, currPos.Quantity, currPos.MeasurementUnit)
+			currMarkBase64 := currMarkBase64interface.(string)
+			if currMarkBase64 == "" {
+				continue
+			}
+			existMarksInCheck = true
+			QuantityPosInterface := v.(map[string]interface{})["quantity"]
+			MeasureUnitInterface := v.(map[string]interface{})["measurementUnit"]
+			QuantityPos := QuantityPosInterface.(float64)
+			MeasureUnit := MeasureUnitInterface.(string)
+			logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, currFullFileName)
+			logsmap[LOGINFO_WITHSTD].Println(logstr)
+			//logginInFile(logstr)
+			imcResultCheckin, err := runProcessCheckMark(fptr, currMarkBase64, QuantityPos, MeasureUnit)
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
 				logsmap[LOGERROR].Println(errorDescr)
-				continue
+				mistakeChechingMark = true
+				break
 			}
-			if !successCommand(resJson) {
-				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", resJson, currMarkBase64, currFullFileName)
-				logsmap[LOGERROR].Println(errorDescr)
-				continue
-			}
-			for i := 0; i < 10; i++ {
-				resJson, err := getStatusOfChecking(fptr)
-				if err != nil {
-					errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
-					logsmap[LOGERROR].Println(errorDescr)
-					continue
-				}
-				if !successCommand(resJson) {
-					errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v для чека %v атол", resJson, currMarkBase64, currFullFileName)
-					logsmap[LOGERROR].Println(errorDescr)
-					continue
-				}
-				err = json.Unmarshal([]byte(resJson), &answerOfCheckMark)
-				if err != nil {
-					errorDescr := fmt.Sprintf("ошибка (%v) парсинга ответа проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
-					logsmap[LOGERROR].Println(errorDescr)
-					continue
-				}
-				if answerOfCheckMark.Ready {
-					break
-				}
-				//пауза в 1 секунду
-				duration := time.Second
-				time.Sleep(duration)
-			}
-			//принимаем марку
-			resOfChecking, err := acceptMark(fptr)
-			if err != nil {
-				errorDescr := fmt.Sprintf("ошибка (%v) принятия марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
-				logsmap[LOGERROR].Println(errorDescr)
-				continue
-			}
-			if !successCommand(resOfChecking) {
-				errorDescr := fmt.Sprintf("ошибка (%v) принятия марки %v для чека %v атол", resOfChecking, currMarkBase64, currFullFileName)
-				logsmap[LOGERROR].Println(errorDescr)
-				continue
-			}
-			err = json.Unmarshal([]byte(resOfChecking), &imcResultCheckin)
-			if err != nil {
-				errorDescr := fmt.Sprintf("ошибка (%v) парсинга ответа проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
-				logsmap[LOGERROR].Println(errorDescr)
-				continue
-			}
+			v.(map[string]interface{})["mark"] = ""
+			logsmap[LOGINFO_WITHSTD].Println("марка успешно проверена")
 			//заполняем данные о марке
-			currPos.ImcParams.ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
-			currPos.ImcParams.ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
-			currPos.ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
-			currPos.ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
-			//fmt.Println(k, v.(TGenearaPosAndTag11921191).Type)
+			logginInFile("заполняем данные о марке")
+			v.(map[string]interface{})["ImcParams"] = new(TImcParams)
+			ImcParams := v.(map[string]interface{})["ImcParams"].(*TImcParams)
+			ImcParams.Imc = currMarkBase64
+			ImcParams.ImcModeProcessing = 0
+			ImcParams.ItemEstimatedStatus = "itemStatusUnchanged"
+			ImcParams.ImcType = "auto"
+			ImcParams.ItemInfoCheckResult = new(TItemInfoCheckResult)
+			ImcParams.ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
+			ImcParams.ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
+			ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
+			ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
 		}
-		//елси есть в чеке марки - то проверяем их
-		//меняем данные результата проверки сголасно полученным данным проверки
-		logsmap[LOGINFO].Printf("послыем команду печати чека кассу json файл %v", jsonCorrection)
+		if mistakeChechingMark {
+			errorDescr := fmt.Sprintf("ошибка проверки марки для чека %v атол", currFullFileName)
+			logsmap[LOGERROR].Println(errorDescr)
+			continue
+		}
+		if existMarksInCheck {
+			jsonCorrWithMarkBytes, err := json.MarshalIndent(receipt, "", "\t")
+			if err != nil {
+				errorDescr := fmt.Sprintf("ошибка (%v) формирования json-а марками для задания чека %v атол", err, currFullFileName)
+				logsmap[LOGERROR].Println(errorDescr)
+				continue
+			}
+			jsonCorrection = string(jsonCorrWithMarkBytes)
+		}
+		logstr = fmt.Sprintf("послыем команду печати чека кассу json файл %v", jsonCorrection)
+		logginInFile(logstr)
 		resulOfCommand, err := sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 			continue
 		}
-		logsmap[LOGINFO].Print("послали команду печати чека кассу json файл")
+		logginInFile("послали команду печати чека кассу json файл")
 		if successCommand(resulOfCommand) {
 			//при успешной печати чека, записываем данные о номере напечатнного чека
 			countPrintedChecks++
@@ -393,7 +385,7 @@ func main() {
 			}
 			file_printed_checks.WriteString(currNumIsprChecka + "\n")
 		}
-	}
+	} ///перебор json заданий
 	logsmap[LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
 	//обработка лог файла
 	//log.Fatal("штатный выход")
@@ -403,7 +395,7 @@ func main() {
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
 	var err error
-	logsmap[LOGINFO].Print("начало процедуры sendComandeAndGetAnswerFromKKT")
+	logginInFile("начало процедуры sendComandeAndGetAnswerFromKKT")
 	//return "", nil
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
 	//fptr.ValidateJson()
@@ -414,31 +406,111 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 		if !*debugpr {
 			desrError := fmt.Sprintf("ошибка (%v) печати чека коррекции на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
-			logsmap[LOGINFO].Print("конец процедуры sendComandeAndGetAnswerFromKKT c ошибкой", err)
+			logstr := fmt.Sprint("конец процедуры sendComandeAndGetAnswerFromKKT c ошибкой", err)
+			logginInFile(logstr)
 			return desrError, err
 		}
 	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
-	logsmap[LOGOTHER].Println("comJson", comJson)
-	logsmap[LOGOTHER].Println("result", result)
+	//logsmap[LOGOTHER].Println("comJson", comJson)
+	//logsmap[LOGOTHER].Println("result", result)
 	//if *debugpr {
 	//}
 	//result := "{\"result\": \"all ok\"}"
-	logsmap[LOGINFO].Print("конец процедуры sendComandeAndGetAnswerFromKKT без ошибки")
+	logginInFile("конец процедуры sendComandeAndGetAnswerFromKKT без ошибки")
 	return result, nil
 }
 
+func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (TItemInfoCheckResult, error) {
+	type TItemInfoCheckResultObject struct {
+		ItemInfoCheckResult TItemInfoCheckResult `json:"itemInfoCheckResult"`
+	}
+	var imcResultCheckinObj TItemInfoCheckResultObject
+	var imcResultCheckin TItemInfoCheckResult
+	logginInFile("начало процедуры runProcessCheckMark")
+	resJson, err := sendCheckOfMark(fptr, mark, qnt, itemUnits)
+	if err != nil {
+		errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v", err, mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
+	}
+	if !successCommand(resJson) {
+		errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v", resJson, mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
+	}
+	for i := 0; i < *countOfCheckingMarks; i++ {
+		var answerOfCheckMark TAnsweChekcMark
+		resJson, err := getStatusOfChecking(fptr)
+		if err != nil {
+			errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", err, mark)
+			logsmap[LOGERROR].Println(errorDescr)
+			return TItemInfoCheckResult{}, errors.New(errorDescr)
+		}
+		if !successCommand(resJson) {
+			errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", resJson, mark)
+			logsmap[LOGERROR].Println(errorDescr)
+			return TItemInfoCheckResult{}, errors.New(errorDescr)
+		}
+		err = json.Unmarshal([]byte(resJson), &answerOfCheckMark)
+		if err != nil {
+			errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) ответа проверки марки %v", err, resJson, mark)
+			logsmap[LOGERROR].Println(errorDescr)
+			return TItemInfoCheckResult{}, errors.New(errorDescr)
+		}
+		if answerOfCheckMark.Ready {
+			if (*emulation) && (i < *countOfCheckingMarks-1) {
+
+			} else {
+				break
+			}
+		}
+		//пауза в 1 секунду
+		logsmap[LOGINFO_WITHSTD].Printf("попытка %v из %v получения статуса марки", i+2, *countOfCheckingMarks)
+		duration := time.Second
+		time.Sleep(duration)
+	}
+	//принимаем марку
+	resOfChecking, err := acceptMark(fptr)
+	if err != nil {
+		errorDescr := fmt.Sprintf("ошибка (%v) принятия марки %v", err, mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
+	}
+	if !successCommand(resOfChecking) {
+		errorDescr := fmt.Sprintf("ошибка (%v) принятия марки %v", resOfChecking, mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
+	}
+	err = json.Unmarshal([]byte(resOfChecking), &imcResultCheckinObj)
+	if err != nil {
+		errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) ответа проверки марки %v", err, resOfChecking, mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
+	}
+	imcResultCheckin.EcrStandAloneFlag = imcResultCheckinObj.ItemInfoCheckResult.EcrStandAloneFlag
+	imcResultCheckin.ImcCheckFlag = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckFlag
+	imcResultCheckin.ImcCheckResult = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckResult
+	imcResultCheckin.ImcEstimatedStatusCorrect = imcResultCheckinObj.ItemInfoCheckResult.ImcEstimatedStatusCorrect
+	imcResultCheckin.ImcStatusInfo = imcResultCheckinObj.ItemInfoCheckResult.ImcStatusInfo
+	logginInFile("конец процедуры runProcessCheckMark без ошибки")
+	return imcResultCheckin, nil
+} //runProcessCheckMark
+
 func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (string, error) {
 	var err error
-	logsmap[LOGINFO].Print("начало процедуры sendCheckOfMark")
+	logginInFile("начало процедуры sendCheckOfMark")
 	//return "", nil
 	comJson, err := getJsonOfBeginCheck(mark, qnt, itemUnits)
 	if err != nil {
 		desrError := fmt.Sprintf("ошибка (%v) фоормирования json задания проверки марки", err)
 		logsmap[LOGERROR].Println(desrError)
-		logsmap[LOGINFO].Print("конец процедуры sendCheckOfMark c ошибкой", err)
+		logstr := fmt.Sprint("конец процедуры sendCheckOfMark c ошибкой", err)
+		logginInFile(logstr)
 		return "", err
 	}
+	logstr := fmt.Sprintf("отправляем запрос (%v) на проверку марки", comJson)
+	logginInFile(logstr)
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
 	if !*emulation {
 		err = fptr.ProcessJson()
@@ -447,18 +519,21 @@ func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits str
 		if !*debugpr {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды начать проверку марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
-			logsmap[LOGINFO].Print("конец процедуры sendCheckOfMark c ошибкой", err)
+			logstr := fmt.Sprint("конец процедуры sendCheckOfMark c ошибкой", err)
+			logginInFile(logstr)
 			return "", err
 		}
 	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
-	logsmap[LOGOTHER].Println("comJson", comJson)
-	logsmap[LOGOTHER].Println("result", result)
+	logstr = fmt.Sprintf("ответ на начало проверки марки: (%v) ", result)
+	logginInFile(logstr)
+	//logsmap[LOGOTHER].Println("comJson", comJson)
+	//logsmap[LOGOTHER].Println("result", result)
 	//if *debugpr {
 	//}
 	//result := "{\"result\": \"all ok\"}"
-	logsmap[LOGINFO].Print("конец процедуры sendCheckOfMark без ошибки")
-	return "", nil
+	logginInFile("конец процедуры sendCheckOfMark без ошибки")
+	return result, nil
 }
 
 func getJsonOfBeginCheck(mark string, qnt float64, itemUnits string) (string, error) {
@@ -482,7 +557,7 @@ func getJsonOfBeginCheck(mark string, qnt float64, itemUnits string) (string, er
 
 func getStatusOfChecking(fptr *fptr10.IFptr) (string, error) {
 	var err error
-	logsmap[LOGINFO].Print("начало процедуры getStatusOfChecking")
+	logginInFile("начало процедуры getStatusOfChecking")
 	//return "", nil
 	comJson := "{\"type\": \"getMarkingCodeValidationStatus\"}"
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
@@ -493,23 +568,27 @@ func getStatusOfChecking(fptr *fptr10.IFptr) (string, error) {
 		if !*debugpr {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды принятия марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
-			logsmap[LOGINFO].Print("конец процедуры getStatusOfChecking c ошибкой", err)
+			logstr := fmt.Sprint("конец процедуры getStatusOfChecking c ошибкой", err)
+			logginInFile(logstr)
 			return "", err
 		}
 	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
-	logsmap[LOGOTHER].Println("comJson", comJson)
-	logsmap[LOGOTHER].Println("result", result)
+	if *emulation {
+		result = "{\"ready\": true}"
+	}
+	//logsmap[LOGOTHER].Println("comJson", comJson)
+	//logsmap[LOGOTHER].Println("result", result)
 	//if *debugpr {
 	//}
 	//result := "{\"result\": \"all ok\"}"
-	logsmap[LOGINFO].Print("конец процедуры getStatusOfChecking без ошибки")
+	logginInFile("конец процедуры getStatusOfChecking без ошибки")
 	return result, nil
 }
 
 func acceptMark(fptr *fptr10.IFptr) (string, error) {
 	var err error
-	logsmap[LOGINFO].Print("начало процедуры acceptMark")
+	logginInFile("начало процедуры acceptMark")
 	//return "", nil
 	comJson := "{\"type\": \"acceptMarkingCode\"}"
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
@@ -520,24 +599,31 @@ func acceptMark(fptr *fptr10.IFptr) (string, error) {
 		if !*debugpr {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды принятия марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
-			logsmap[LOGINFO].Print("конец процедуры acceptMark c ошибкой", err)
+			logstr := fmt.Sprint("конец процедуры acceptMark c ошибкой", err)
+			logginInFile(logstr)
 			return "", err
 		}
 	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
-	logsmap[LOGOTHER].Println("comJson", comJson)
-	logsmap[LOGOTHER].Println("result", result)
+	if *emulation {
+		result = "{\"itemInfoCheckResult\": {\"ecrStandAloneFlag\": false,\"imcCheckFlag\": true,\"imcCheckResult\": true,\"imcEstimatedStatusCorrect\": true,\"imcStatusInfo\": true}}"
+	}
+	//logsmap[LOGOTHER].Println("comJson", comJson)
+	//logsmap[LOGOTHER].Println("result", result)
 	//if *debugpr {
 	//}
+	logstr := fmt.Sprintf("результат проверки марки (%v) ", result)
+	logginInFile(logstr)
 	//result := "{\"result\": \"all ok\"}"
-	logsmap[LOGINFO].Print("конец процедуры acceptMark без ошибки")
+	logginInFile("конец процедуры acceptMark без ошибки")
 	return result, nil
 }
 
 func listDirByReadDir(path string) ([]string, error) {
 	var spisFiles []string
-	logsmap[LOGINFO].Printf("перебор файлов в директории %v--BEGIN\n", path)
-	defer logsmap[LOGINFO].Printf("перебор файлов в директории %v--END\n", path)
+	logstr := fmt.Sprintf("перебор файлов в директории %v--BEGIN\n", path)
+	logginInFile(logstr)
+	defer logginInFile(fmt.Sprintf("перебор файлов в директории %v--END\n", path))
 	lst, err := ioutil.ReadDir(path)
 	if err != nil {
 		return spisFiles, err
@@ -567,7 +653,8 @@ func listDirByReadDir(path string) ([]string, error) {
 		if err != nil {
 			return spisFiles, err
 		}*/
-		logsmap[LOGINFO].Println("matched=", matched)
+		logstr = fmt.Sprintln("matched=", matched)
+		logginInFile(logstr)
 		if matched {
 			spisFiles = append(spisFiles, val.Name())
 		}
@@ -641,11 +728,15 @@ func getFDFromFileName(fileNameOfJson string) string {
 }
 
 func readJsonFromFile(currFullFileName string) (string, error) {
-	logsmap[LOGINFO].Println("начало процедуры readJsonFromFile чтения файла", currFullFileName)
+	logstr := fmt.Sprintln("начало процедуры readJsonFromFile чтения файла", currFullFileName)
+	logginInFile(logstr)
 	plan, err := ioutil.ReadFile(currFullFileName)
-	logsmap[LOGINFO].Println("plan", plan)
-	logsmap[LOGINFO].Println("error", err)
-	logsmap[LOGINFO].Println("конец процедуры readJsonFromFile")
+	logstr = fmt.Sprintln("plan", plan)
+	logginInFile(logstr)
+	logstr = fmt.Sprintln("error", err)
+	logginInFile(logstr)
+	logstr = fmt.Sprintln("конец процедуры readJsonFromFile")
+	logginInFile(logstr)
 	return string(plan), err
 }
 
@@ -681,6 +772,12 @@ func getCurrentPortOfKass(dirOfJsons string) (string, error) {
 		return desrError, err
 	}
 	return string(comportb), nil
+}
+
+func logginInFile(loggin string) {
+	if *debug {
+		logsmap[LOGINFO].Println(loggin)
+	}
 }
 
 func intitLog(logFile string, pref string, clearLogs bool) (*os.File, *log.Logger, error) {
