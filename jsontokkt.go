@@ -149,7 +149,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_01_02"
+const Version_of_program = "2024_02_01_03"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
