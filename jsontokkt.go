@@ -66,6 +66,7 @@ type TPosition struct {
 	Print        bool               `json:"print,omitempty"`
 	ProductCodes *TProductCodesAtol `json:"productCodes,omitempty"`
 	ImcParams    *TImcParams        `json:"imcParams,omitempty"`
+	//Mark         string             `json:"mark,omitempty"`
 }
 
 type TAnsweChekcMark struct {
@@ -95,6 +96,16 @@ type TImcParams struct {
 	ItemQuantity        float64               `json:"itemQuantity,omitempty"`
 	ItemUnits           string                `json:"itemUnits,omitempty"`
 	NotSendToServer     bool                  `json:"notSendToServer,omitempty"`
+}
+
+type TAnswerGetStatusOfShift struct {
+	ShiftStatus TShiftStatus `json:"shiftStatus"`
+}
+type TShiftStatus struct {
+	DocumentsCount int    `json:"documentsCount"`
+	ExpiredTime    string `json:"expiredTime"`
+	Number         int    `json:"number"`
+	State          string `json:"state"`
 }
 
 type TTag1192_91 struct {
@@ -137,7 +148,7 @@ var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи 
 var debugpr = flag.Bool("debug1", false, "дебажим программу")
 var debug = flag.Bool("debug2", false, "режим отладки")
 var emulation = flag.Bool("emul", false, "эмуляция")
-var countOfCheckingMarks = flag.Int("attempts", 10, "число попыток провекри марки")
+var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
 
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
@@ -149,7 +160,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_01_03"
+const Version_of_program = "2024_02_02_02"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -315,7 +326,11 @@ func main() {
 				continue
 
 			}
-			currMarkBase64interface, ok := v.(map[string]interface{})["mark"]
+			LocImcParams, ok := v.(map[string]interface{})["imcParams"]
+			if !ok {
+				continue
+			}
+			currMarkBase64interface, ok := LocImcParams.(map[string]interface{})["imc"]
 			if !ok {
 				continue
 			}
@@ -324,35 +339,46 @@ func main() {
 				continue
 			}
 			existMarksInCheck = true
-			QuantityPosInterface := v.(map[string]interface{})["quantity"]
-			MeasureUnitInterface := v.(map[string]interface{})["measurementUnit"]
-			QuantityPos := QuantityPosInterface.(float64)
-			MeasureUnit := MeasureUnitInterface.(string)
+			//QuantityPosInterface := v.(map[string]interface{})["quantity"]
+			//MeasureUnitInterface := v.(map[string]interface{})["measurementUnit"]
+			//QuantityPos := QuantityPosInterface.(float64)
+			//MeasureUnit := MeasureUnitInterface.(string)
 			logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, currFullFileName)
 			logsmap[LOGINFO_WITHSTD].Println(logstr)
 			//logginInFile(logstr)
-			imcResultCheckin, err := runProcessCheckMark(fptr, currMarkBase64, QuantityPos, MeasureUnit)
+			imcResultCheckin, err := runProcessCheckMark(fptr, currMarkBase64, 0, "")
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
 				logsmap[LOGERROR].Println(errorDescr)
 				mistakeChechingMark = true
 				break
 			}
-			v.(map[string]interface{})["mark"] = ""
+			//v.(map[string]interface{})["mark"] = ""
 			logsmap[LOGINFO_WITHSTD].Println("марка успешно проверена")
 			//заполняем данные о марке
 			logginInFile("заполняем данные о марке")
-			v.(map[string]interface{})["ImcParams"] = new(TImcParams)
-			ImcParams := v.(map[string]interface{})["ImcParams"].(*TImcParams)
-			ImcParams.Imc = currMarkBase64
-			ImcParams.ImcModeProcessing = 0
-			ImcParams.ItemEstimatedStatus = "itemStatusUnchanged"
-			ImcParams.ImcType = "auto"
-			ImcParams.ItemInfoCheckResult = new(TItemInfoCheckResult)
-			ImcParams.ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
-			ImcParams.ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
-			ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
-			ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
+			//v.(map[string]interface{})["imcParams"] = new(TImcParams)
+			//ImcParams := v.(map[string]interface{})["ImcParams"].(*TImcParams)
+			ImcParams := LocImcParams.(map[string]interface{})
+			ImcParams["imc"] = currMarkBase64
+			ImcParams["imcModeProcessing"] = 0
+			ImcParams["itemEstimatedStatus"] = "itemStatusUnchanged"
+			ImcParams["imcType"] = "auto"
+			ImcParams["itemInfoCheckResult"] = new(TItemInfoCheckResult)
+			ItemInfoCheckResult := ImcParams["itemInfoCheckResult"].(*TItemInfoCheckResult)
+			ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
+			ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
+			ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
+			ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
+			//mcParams.Imc = currMarkBase64
+			//ImcParams.ImcModeProcessing = 0
+			//ImcParams.ItemEstimatedStatus = "itemStatusUnchanged"
+			//ImcParams.ImcType = "auto"
+			//ImcParams.ItemInfoCheckResult = new(TItemInfoCheckResult)
+			//ImcParams.ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
+			//ImcParams.ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
+			//ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
+			//ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
 		}
 		if mistakeChechingMark {
 			errorDescr := fmt.Sprintf("ошибка проверки марки для чека %v атол", currFullFileName)
@@ -404,7 +430,7 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 	}
 	if err != nil {
 		if !*debugpr {
-			desrError := fmt.Sprintf("ошибка (%v) печати чека коррекции на кассовом аппарате", err)
+			desrError := fmt.Sprintf("ошибка (%v) выполнение команды %v на кассе", err, comJson)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры sendComandeAndGetAnswerFromKKT c ошибкой", err)
 			logginInFile(logstr)
@@ -422,12 +448,32 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 }
 
 func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (TItemInfoCheckResult, error) {
+	var countAttempts int
 	type TItemInfoCheckResultObject struct {
 		ItemInfoCheckResult TItemInfoCheckResult `json:"itemInfoCheckResult"`
 	}
 	var imcResultCheckinObj TItemInfoCheckResultObject
 	var imcResultCheckin TItemInfoCheckResult
 	logginInFile("начало процедуры runProcessCheckMark")
+	//проверяем - открыта ли смена
+	//shiftOpenned, err := checkOpenShift(fptr, true, "админ")
+	//if err != nil {
+	//	errorDescr := fmt.Sprintf("ошибка (%v). Смена не открыта", err)
+	//	logsmap[LOGERROR].Println(errorDescr)
+	//	return TItemInfoCheckResult{}, errors.New(errorDescr)
+	//}
+	//if !shiftOpenned {
+	//	errorDescr := fmt.Sprintf("ошибка (%v) - смена не открыта", err)
+	//	logsmap[LOGERROR].Println(errorDescr)
+	//	return TItemInfoCheckResult{}, errors.New(errorDescr)
+	//}
+	//очищаем таблицу марок
+	logginInFile("очищаем таблицу марок")
+	clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
+	resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
+	logstr := fmt.Sprintf("результат очистки таблицы марок: %v", resClearTableMarks)
+	logginInFile(logstr)
+	//посылаем запрос на проверку марки
 	resJson, err := sendCheckOfMark(fptr, mark, qnt, itemUnits)
 	if err != nil {
 		errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v", err, mark)
@@ -439,7 +485,7 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 		logsmap[LOGERROR].Println(errorDescr)
 		return TItemInfoCheckResult{}, errors.New(errorDescr)
 	}
-	for i := 0; i < *countOfCheckingMarks; i++ {
+	for countAttempts = 0; countAttempts < *countOfCheckingMarks; countAttempts++ {
 		var answerOfCheckMark TAnsweChekcMark
 		resJson, err := getStatusOfChecking(fptr)
 		if err != nil {
@@ -459,16 +505,21 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 			return TItemInfoCheckResult{}, errors.New(errorDescr)
 		}
 		if answerOfCheckMark.Ready {
-			if (*emulation) && (i < *countOfCheckingMarks-1) {
+			if (*emulation) && (countAttempts < *countOfCheckingMarks-18) {
 
 			} else {
 				break
 			}
 		}
 		//пауза в 1 секунду
-		logsmap[LOGINFO_WITHSTD].Printf("попытка %v из %v получения статуса марки", i+2, *countOfCheckingMarks)
+		logsmap[LOGINFO_WITHSTD].Printf("попытка %v из %v получения статуса марки", countAttempts+2, *countOfCheckingMarks)
 		duration := time.Second
 		time.Sleep(duration)
+	}
+	if countAttempts == *countOfCheckingMarks {
+		errorDescr := fmt.Sprintf("ошибка проверки марки %v", mark)
+		logsmap[LOGERROR].Println(errorDescr)
+		return TItemInfoCheckResult{}, errors.New(errorDescr)
 	}
 	//принимаем марку
 	resOfChecking, err := acceptMark(fptr)
@@ -540,12 +591,12 @@ func getJsonOfBeginCheck(mark string, qnt float64, itemUnits string) (string, er
 	var begMarkStructur TBeginTaskMarkCheck
 	begMarkStructur.Type = "beginMarkingCodeValidation"
 	begMarkStructur.Params.Imc = mark
-	begMarkStructur.Params.ItemQuantity = qnt
-	begMarkStructur.Params.ItemUnits = itemUnits
+	//begMarkStructur.Params.ItemQuantity = qnt
+	//begMarkStructur.Params.ItemUnits = itemUnits
 	begMarkStructur.Params.ImcType = "auto"
 	begMarkStructur.Params.ItemEstimatedStatus = "itemStatusUnchanged"
 	begMarkStructur.Params.ImcModeProcessing = 0
-	begMarkStructur.Params.NotSendToServer = false
+	//begMarkStructur.Params.NotSendToServer = false
 	resstr, err := json.MarshalIndent(begMarkStructur, "", "\t")
 	if err != nil {
 		desrError := fmt.Sprintf("ошибка (%v) формирования json задания проверки марки", err)
@@ -802,3 +853,59 @@ func intitLog(logFile string, pref string, clearLogs bool) (*os.File, *log.Logge
 	loger := log.New(multwr, pref+" ", flagsLogs)
 	return f, loger, nil
 }
+
+/* func checkOpenShift(fptr *fptr10.IFptr, openShiftIfClose bool, kassir string) (bool, error) {
+	logginInFile("получаем статус ККТ")
+	getStatusKKTJson := "{\"type\": \"getDeviceStatus\"}"
+	resgetStatusKKT, err := sendComandeAndGetAnswerFromKKT(fptr, getStatusKKTJson)
+	if err != nil {
+		errorDescr := fmt.Sprintf("ошибка (%v) получения статуса кассы", err)
+		logsmap[LOGERROR].Println(errorDescr)
+		return false, err
+	}
+	if !successCommand(resgetStatusKKT) {
+		errorDescr := fmt.Sprintf("ошибка (%v) получения статуса кассы", resgetStatusKKT)
+		logsmap[LOGERROR].Println(errorDescr)
+		//logginInFile(errorDescr)
+		return false, errors.New(errorDescr)
+	}
+	logginInFile("получили статус кассы")
+	//проверяем - открыта ли смена
+	var answerOfGetStatusofShift TAnswerGetStatusOfShift
+	err = json.Unmarshal([]byte(resgetStatusKKT), &answerOfGetStatusofShift)
+	if err != nil {
+		errorDescr := fmt.Sprintf("ошибка (%v) распарсивания статуса кассы", err)
+		logsmap[LOGERROR].Println(errorDescr)
+		return false, err
+	}
+	if answerOfGetStatusofShift.ShiftStatus.State == "expired" {
+		errorDescr := "ошибка - смена на кассе уже истекла. Закройте смену"
+		logsmap[LOGERROR].Println(errorDescr)
+		return false, errors.New(errorDescr)
+	}
+	if answerOfGetStatusofShift.ShiftStatus.State == "closed" {
+		if openShiftIfClose {
+			if kassir == "" {
+				errorDescr := "не указано имя кассира для открытия смены"
+				logsmap[LOGERROR].Println(errorDescr)
+				return false, errors.New(errorDescr)
+			}
+			jsonOpenShift := fmt.Sprintf("{\"type\": \"openShift\",\"operator\": {\"name\": \"%v\"}}", kassir)
+			resOpenShift, err := sendComandeAndGetAnswerFromKKT(fptr, jsonOpenShift)
+			if err != nil {
+				errorDescr := fmt.Sprintf("ошбика (%v) - не удалось открыть смену", err)
+				logsmap[LOGERROR].Println(errorDescr)
+				return false, errors.New(errorDescr)
+			}
+			if !successCommand(resOpenShift) {
+				errorDescr := fmt.Sprintf("ошбика (%v) - не удалось открыть смену", resOpenShift)
+				logsmap[LOGERROR].Println(errorDescr)
+				return false, errors.New(errorDescr)
+			}
+		} else {
+			return false, nil
+		}
+	}
+	return true, nil
+} //checkOpenShift
+*/
