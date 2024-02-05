@@ -1,3 +1,4 @@
+//go:generate ./resource/goversioninfo.exe -icon=resource/icon.ico -manifest=resource/goversioninfo.exe.manifest
 package main
 
 import (
@@ -149,6 +150,8 @@ var debugpr = flag.Bool("debug1", false, "дебажим программу")
 var debug = flag.Bool("debug2", false, "режим отладки")
 var emulation = flag.Bool("emul", false, "эмуляция")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
+var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
+var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
 
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
@@ -160,7 +163,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_02_02"
+const Version_of_program = "2024_02_05_02"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -294,10 +297,36 @@ func main() {
 
 	//перебор json заданаий и обработка
 	countPrintedChecks := 0
+	amountOfMistakesChecks := 0
+	amountOfMistakesMarks := 0
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
 	for k, currFullFileName := range listOfFiles {
 		var receipt TCorrectionCheck
+		command := ""
+		if amountOfMistakesChecks >= *countOfMistakesCheckForStop {
+			descrError := "превышено количество ошибок чеков, остановка работы программы"
+			logginInFile(descrError)
+			resDial, command := dialogContinuePrintChecks()
+			if !resDial && (command != "off/on") {
+				descrError := "работы программы прервана пользователем"
+				logsmap[LOGERROR].Println(descrError)
+				//println("Нажмите любую клавишу...")
+				//input.Scan()
+				//log.Panic(descrError)
+				break
+			}
+			amountOfMistakesChecks = 0
+			amountOfMistakesMarks = 0
+		}
+		if command == "off/on" {
+			command = ""
+			err := reconnectToKKT(fptr)
+			if err != nil {
+				logsmap[LOGERROR].Printf("ошибка переподключения к ККТ %v", err)
+				break
+			}
+		}
 		currNumIsprChecka := getFDFromFileName(currFullFileName)
 		logsmap[LOGINFO_WITHSTD].Printf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName)
 		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
@@ -306,6 +335,7 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) чтения json задания чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
+			amountOfMistakesChecks += 1
 			continue
 		}
 		logstr = fmt.Sprintf("прочитали json файл %v", currFullFileName)
@@ -317,8 +347,18 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) json задания чека %v атол", err, jsonCorrection, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
+			amountOfMistakesChecks += 1
 			continue
 		}
+		//очищаем таблицу марок
+		if *clearTableOfMarks {
+			logginInFile("очищаем таблицу марок")
+			clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
+			resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
+			logstr = fmt.Sprintf("результат очистки таблицы марок: %v", resClearTableMarks)
+			logginInFile(logstr)
+		}
+		//читаем данные по маркам
 		mistakeChechingMark := false
 		for _, v := range receipt.Items {
 			typeItem := v.(map[string]interface{})["type"]
@@ -383,6 +423,8 @@ func main() {
 		if mistakeChechingMark {
 			errorDescr := fmt.Sprintf("ошибка проверки марки для чека %v атол", currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
+			amountOfMistakesChecks += 1
+			amountOfMistakesMarks += 1
 			continue
 		}
 		if existMarksInCheck {
@@ -390,6 +432,7 @@ func main() {
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) формирования json-а марками для задания чека %v атол", err, currFullFileName)
 				logsmap[LOGERROR].Println(errorDescr)
+				amountOfMistakesChecks += 1
 				continue
 			}
 			jsonCorrection = string(jsonCorrWithMarkBytes)
@@ -400,6 +443,7 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
+			amountOfMistakesChecks += 1
 			continue
 		}
 		logginInFile("послали команду печати чека кассу json файл")
@@ -417,6 +461,19 @@ func main() {
 	//log.Fatal("штатный выход")
 	println("Нажмите любую клавишу...")
 	input.Scan()
+}
+
+func dialogContinuePrintChecks() (bool, string) {
+	res := true
+	command := ""
+	input := bufio.NewScanner(os.Stdin)
+	println("Продолжить (да - продолжить печать чеков, нет (по умолчанию) - завершить программу, \"off/on\" - переподключиться к кассе):")
+	if input.Text() == "off/on" {
+		command = "off/on"
+	}
+	input.Scan()
+	res, _ = getBoolFromString(input.Text(), res)
+	return res, command
 }
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
@@ -467,12 +524,6 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 	//	logsmap[LOGERROR].Println(errorDescr)
 	//	return TItemInfoCheckResult{}, errors.New(errorDescr)
 	//}
-	//очищаем таблицу марок
-	logginInFile("очищаем таблицу марок")
-	clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
-	resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
-	logstr := fmt.Sprintf("результат очистки таблицы марок: %v", resClearTableMarks)
-	logginInFile(logstr)
 	//посылаем запрос на проверку марки
 	resJson, err := sendCheckOfMark(fptr, mark, qnt, itemUnits)
 	if err != nil {
@@ -852,6 +903,63 @@ func intitLog(logFile string, pref string, clearLogs bool) (*os.File, *log.Logge
 	}
 	loger := log.New(multwr, pref+" ", flagsLogs)
 	return f, loger, nil
+}
+
+func getBoolFromString(val string, onErrorDefault bool) (bool, error) {
+	var err error
+	res := onErrorDefault
+	if (val == "да") || (val == "ДА") || (val == "Да") || (val == "yes") || (val == "Yes") || (val == "YES") {
+		res = true
+	} else if (val == "НЕТ") || (val == "нет") || (val == "Нет") || (val == "no") || (val == "No") || (val == "NO") {
+		res = false
+	} else {
+		res, err = strconv.ParseBool(val)
+		if err != nil {
+			res = onErrorDefault
+		}
+	}
+	return res, err
+}
+
+func reconnectToKKT(fptr *fptr10.IFptr) error {
+	fptr.Close()
+	fptr.Destroy()
+	fptr, err := fptr10.NewSafe()
+	if err != nil {
+		descrError := fmt.Sprintf("ошибка (%v) инициализации драйвера ККТ атол", err)
+		logsmap[LOGERROR].Println(descrError)
+		return errors.New(descrError)
+		//println("Нажмите любую клавишу...")
+		//input.Scan()
+		//log.Panic(descrError)
+	}
+	//defer fptr.Destroy()
+	fmt.Println(fptr.Version())
+	//сединение с кассой
+	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой")
+	comPort, err := getCurrentPortOfKass(DIROFJSONS)
+	if err != nil {
+		desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
+		logsmap[LOGERROR].Println(desrErr)
+		return errors.New(desrErr)
+		//println("Нажмите любую клавишу...")
+		//input.Scan()
+		//log.Panic(desrErr)
+	}
+	if !connectWithKassa(fptr, comPort) {
+		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом на ком порт %v", comPort)
+		logsmap[LOGERROR].Println(descrErr)
+		if !*debugpr {
+			return errors.New(descrErr)
+			//println("Нажмите любую клавишу...")
+			//input.Scan()
+			//log.Panic(descrErr)
+		}
+	} else {
+		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", comPort)
+	}
+	return nil
+	//defer fptr.Close()
 }
 
 /* func checkOpenShift(fptr *fptr10.IFptr, openShiftIfClose bool, kassir string) (bool, error) {
