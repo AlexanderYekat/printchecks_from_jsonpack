@@ -149,6 +149,7 @@ var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи 
 var debugpr = flag.Bool("debug1", false, "дебажим программу")
 var debug = flag.Bool("debug2", false, "режим отладки")
 var emulation = flag.Bool("emul", false, "эмуляция")
+var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
 var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
@@ -163,7 +164,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_05_02"
+const Version_of_program = "2024_02_05_03"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -268,7 +269,7 @@ func main() {
 		log.Panic(desrErr)
 	}
 	if !connectWithKassa(fptr, comPort) {
-		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом на ком порт %v", comPort)
+		descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом на ком порт %v", comPort)
 		logsmap[LOGERROR].Println(descrErr)
 		if !*debugpr {
 			println("Нажмите любую клавишу...")
@@ -307,7 +308,8 @@ func main() {
 		if amountOfMistakesChecks >= *countOfMistakesCheckForStop {
 			descrError := "превышено количество ошибок чеков, остановка работы программы"
 			logginInFile(descrError)
-			resDial, command := dialogContinuePrintChecks()
+			resDial := false
+			resDial, command = dialogContinuePrintChecks()
 			if !resDial && (command != "off/on") {
 				descrError := "работы программы прервана пользователем"
 				logsmap[LOGERROR].Println(descrError)
@@ -319,8 +321,10 @@ func main() {
 			amountOfMistakesChecks = 0
 			amountOfMistakesMarks = 0
 		}
+		logsmap[LOGINFO_WITHSTD].Println("command", command)
 		if command == "off/on" {
 			command = ""
+			logsmap[LOGINFO_WITHSTD].Println("reconnectToKKT")
 			err := reconnectToKKT(fptr)
 			if err != nil {
 				logsmap[LOGERROR].Printf("ошибка переподключения к ККТ %v", err)
@@ -335,7 +339,7 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) чтения json задания чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
-			amountOfMistakesChecks += 1
+			amountOfMistakesChecks++
 			continue
 		}
 		logstr = fmt.Sprintf("прочитали json файл %v", currFullFileName)
@@ -347,7 +351,7 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) json задания чека %v атол", err, jsonCorrection, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
-			amountOfMistakesChecks += 1
+			amountOfMistakesChecks++
 			continue
 		}
 		//очищаем таблицу марок
@@ -359,7 +363,7 @@ func main() {
 			logginInFile(logstr)
 		}
 		//читаем данные по маркам
-		mistakeChechingMark := false
+		mistakeCheckingMark := false
 		for _, v := range receipt.Items {
 			typeItem := v.(map[string]interface{})["type"]
 			if typeItem != "position" {
@@ -390,7 +394,7 @@ func main() {
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
 				logsmap[LOGERROR].Println(errorDescr)
-				mistakeChechingMark = true
+				mistakeCheckingMark = true
 				break
 			}
 			//v.(map[string]interface{})["mark"] = ""
@@ -420,11 +424,11 @@ func main() {
 			//ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
 			//ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
 		}
-		if mistakeChechingMark {
+		if mistakeCheckingMark {
 			errorDescr := fmt.Sprintf("ошибка проверки марки для чека %v атол", currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
-			amountOfMistakesChecks += 1
-			amountOfMistakesMarks += 1
+			amountOfMistakesChecks++
+			amountOfMistakesMarks++
 			continue
 		}
 		if existMarksInCheck {
@@ -432,7 +436,7 @@ func main() {
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) формирования json-а марками для задания чека %v атол", err, currFullFileName)
 				logsmap[LOGERROR].Println(errorDescr)
-				amountOfMistakesChecks += 1
+				amountOfMistakesChecks++
 				continue
 			}
 			jsonCorrection = string(jsonCorrWithMarkBytes)
@@ -443,10 +447,19 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
-			amountOfMistakesChecks += 1
+			amountOfMistakesChecks++
 			continue
 		}
 		logginInFile("послали команду печати чека кассу json файл")
+		if *emulatmistakes {
+			logsmap[LOGINFO_WITHSTD].Println("countPrintedChecks", countPrintedChecks)
+			logsmap[LOGINFO_WITHSTD].Println("countPrintedChecks%10", countPrintedChecks%10)
+			if countPrintedChecks%10 == 0 {
+				logginInFile("производим ошибку печати чека")
+				logsmap[LOGINFO_WITHSTD].Println("производим ошибку печати чека")
+				resulOfCommand = "{\"result\": \"error - эмуляция ошибки\"}"
+			}
+		}
 		if successCommand(resulOfCommand) {
 			//при успешной печати чека, записываем данные о номере напечатнного чека
 			countPrintedChecks++
@@ -454,7 +467,12 @@ func main() {
 				file_printed_checks.WriteString("\n")
 			}
 			file_printed_checks.WriteString(currNumIsprChecka + "\n")
+		} else {
+			logsmap[LOGERROR].Printf("ошибка (%v) печати чека на ККТ", resulOfCommand)
+			logginInFile(fmt.Sprintf("ошибка (%v) печати чека на ККТ", resulOfCommand))
+			amountOfMistakesChecks++
 		}
+		logsmap[LOGINFO_WITHSTD].Println("amountOfMistakesChecks", amountOfMistakesChecks)
 	} ///перебор json заданий
 	logsmap[LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
 	//обработка лог файла
@@ -468,11 +486,15 @@ func dialogContinuePrintChecks() (bool, string) {
 	command := ""
 	input := bufio.NewScanner(os.Stdin)
 	println("Продолжить (да - продолжить печать чеков, нет (по умолчанию) - завершить программу, \"off/on\" - переподключиться к кассе):")
+	input.Scan()
 	if input.Text() == "off/on" {
 		command = "off/on"
 	}
-	input.Scan()
-	res, _ = getBoolFromString(input.Text(), res)
+	if input.Text() == "" {
+		res = false
+	} else {
+		res, _ = getBoolFromString(input.Text(), res)
+	}
 	return res, command
 }
 
@@ -755,8 +777,8 @@ func listDirByReadDir(path string) ([]string, error) {
 		if err != nil {
 			return spisFiles, err
 		}*/
-		logstr = fmt.Sprintln("matched=", matched)
-		logginInFile(logstr)
+		//logstr = fmt.Sprintln("matched=", matched)
+		//logginInFile(logstr)
 		if matched {
 			spisFiles = append(spisFiles, val.Name())
 		}
