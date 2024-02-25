@@ -146,8 +146,14 @@ var DIROFJSONS = ".\\jsons\\works\\"
 
 var dirOfjsons = flag.String("dirjsons", ".\\jsons\\works\\", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
-var debugpr = flag.Bool("debug1", false, "дебажим программу")
-var debug = flag.Bool("debug2", false, "режим отладки")
+var countChecksForPause = flag.Int("countforpause", 0, "число чеков, после которых программа делает небольшую паузу")
+var pauseInSecondsMayClose = flag.Int("secpause", 10, "сколько секунд на паузу, если вдруг надо завершить программу")
+var LogsDebugs = flag.Int("debug", 0, "уровень логирования всех действий, чем выше тем больше логов")
+var comport = flag.Int("com", 0, "ком порт кассы")
+var emailforcheck = flag.String("email", "", "email клиента чека")
+var PrintCheckOnKKT = flag.String("print", "", "печтать или не печатать чек на ККТ: true - печатать, false - не печетать")
+var ipaddresskkt = flag.String("ipkkt", "", "ip адрес ккт")
+var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервера ккт")
 var emulation = flag.Bool("emul", false, "эмуляция")
 var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
@@ -164,7 +170,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_05_03"
+const Version_of_program = "2024_02_25_04"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -179,9 +185,8 @@ func main() {
 
 	fmt.Println("парсинг параметров запуска программы")
 	flag.Parse()
-	fmt.Println("emulation", *emulation)
-	fmt.Println("debugpr", *debugpr)
-	fmt.Println("debug: ", *debug)
+	fmt.Println("Эмулирование ККТ", *emulation)
+	fmt.Println("Уровень логирования: ", *LogsDebugs)
 	clearLogsDescr := fmt.Sprintf("Очистить логи программы %v", *clearLogsProgramm)
 	fmt.Println(clearLogsDescr)
 	fmt.Println("инициализация лог файлов программы")
@@ -220,12 +225,19 @@ func main() {
 		input.Scan()
 		log.Panic(descrError)
 	}
-
+	*comport, _ = getCurrentPortOfKass(DIROFJSONS)
+	//if err != nil {
+	//desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
+	//logsmap[LOGERROR].Println(desrErr)
+	//println("Нажмите любую клавишу...")
+	//input.Scan()
+	//log.Panic(desrErr)
+	//}
+	logsmap[LOGINFO_WITHSTD].Println("порт кассы", *comport)
 	listOfFilesTempr, err := listDirByReadDir(DIROFJSONS)
 	if err != nil {
 		logsmap[LOGERROR].Printf("ошибка поиска json заданий в директории %v c ошибкой %v", DIROFJSONS, err)
 	}
-
 	var listOfFiles []string
 	countOfFiles := len(listOfFilesTempr)
 	logsmap[LOGINFO_WITHSTD].Println("Всего json файлов", countOfFiles)
@@ -260,24 +272,16 @@ func main() {
 	fmt.Println(fptr.Version())
 	//сединение с кассой
 	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой")
-	comPort, err := getCurrentPortOfKass(DIROFJSONS)
-	if err != nil {
-		desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
-		logsmap[LOGERROR].Println(desrErr)
-		println("Нажмите любую клавишу...")
-		input.Scan()
-		log.Panic(desrErr)
-	}
-	if !connectWithKassa(fptr, comPort) {
-		descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом на ком порт %v", comPort)
+	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
+		descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом %v", typepodkluch)
 		logsmap[LOGERROR].Println(descrErr)
-		if !*debugpr {
+		if !*emulation {
 			println("Нажмите любую клавишу...")
 			input.Scan()
 			log.Panic(descrErr)
 		}
 	} else {
-		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", comPort)
+		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
 	}
 	defer fptr.Close()
 	//jsonAnswer, err := sendComandeAndGetAnswerFromKKT(fptr, string(d.Body))
@@ -320,11 +324,22 @@ func main() {
 			}
 			amountOfMistakesChecks = 0
 			amountOfMistakesMarks = 0
+		} else {
+			if *countChecksForPause > 0 {
+				if ((countPrintedChecks + 1) % *countChecksForPause) == 0 {
+					//if ((k + 1) % *countChecksForPause) == 0 {
+					logginInFile(fmt.Sprintf("делаем паузу в программе через каждые %v чеков для возможной безопасной её остановки на %v секунд...", *countChecksForPause, *pauseInSecondsMayClose))
+					logsmap[LOGINFO_WITHSTD].Println("если процесс печати чеков нужно прервать, то это можно сделать сейчас")
+					duration := time.Second * time.Duration((*pauseInSecondsMayClose))
+					time.Sleep(duration)
+				}
+			}
 		}
-		logsmap[LOGINFO_WITHSTD].Println("command", command)
+		//logsmap[LOGINFO_WITHSTD].Println()
+		logginInFile(fmt.Sprintln("command", command))
 		if command == "off/on" {
 			command = ""
-			logsmap[LOGINFO_WITHSTD].Println("reconnectToKKT")
+			logsmap[LOGINFO_WITHSTD].Println("переподключение к кассовому аппарату...")
 			err := reconnectToKKT(fptr)
 			if err != nil {
 				logsmap[LOGERROR].Printf("ошибка переподключения к ККТ %v", err)
@@ -368,7 +383,6 @@ func main() {
 			typeItem := v.(map[string]interface{})["type"]
 			if typeItem != "position" {
 				continue
-
 			}
 			LocImcParams, ok := v.(map[string]interface{})["imcParams"]
 			if !ok {
@@ -431,7 +445,20 @@ func main() {
 			amountOfMistakesMarks++
 			continue
 		}
-		if existMarksInCheck {
+		wasChangeParametersOfCheck := false
+		if *emailforcheck != "" {
+			if receipt.ClientInfo.EmailOrPhone != *emailforcheck {
+				receipt.ClientInfo.EmailOrPhone = *emailforcheck
+				wasChangeParametersOfCheck = true
+			}
+		}
+		if *PrintCheckOnKKT != "" {
+			if printloc, err := getBoolFromString(*PrintCheckOnKKT, !receipt.Electronically); (!receipt.Electronically != printloc) && (err == nil) {
+				receipt.Electronically = !printloc
+				wasChangeParametersOfCheck = true
+			}
+		}
+		if (existMarksInCheck) || (wasChangeParametersOfCheck) {
 			jsonCorrWithMarkBytes, err := json.MarshalIndent(receipt, "", "\t")
 			if err != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) формирования json-а марками для задания чека %v атол", err, currFullFileName)
@@ -472,7 +499,9 @@ func main() {
 			logginInFile(fmt.Sprintf("ошибка (%v) печати чека на ККТ", resulOfCommand))
 			amountOfMistakesChecks++
 		}
-		logsmap[LOGINFO_WITHSTD].Println("amountOfMistakesChecks", amountOfMistakesChecks)
+		if amountOfMistakesChecks > 0 {
+			logginInFile(fmt.Sprintln("количество не напечатанных чеков", amountOfMistakesChecks))
+		}
 	} ///перебор json заданий
 	logsmap[LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
 	//обработка лог файла
@@ -508,7 +537,7 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 		err = fptr.ProcessJson()
 	}
 	if err != nil {
-		if !*debugpr {
+		if !*emulation {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды %v на кассе", err, comJson)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры sendComandeAndGetAnswerFromKKT c ошибкой", err)
@@ -519,7 +548,7 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
 	//logsmap[LOGOTHER].Println("comJson", comJson)
 	//logsmap[LOGOTHER].Println("result", result)
-	//if *debugpr {
+	//if *emulation {
 	//}
 	//result := "{\"result\": \"all ok\"}"
 	logginInFile("конец процедуры sendComandeAndGetAnswerFromKKT без ошибки")
@@ -579,7 +608,7 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 		}
 		if answerOfCheckMark.Ready {
 			if (*emulation) && (countAttempts < *countOfCheckingMarks-18) {
-
+				//емулируем задержку полчение марки
 			} else {
 				break
 			}
@@ -640,7 +669,7 @@ func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits str
 		err = fptr.ProcessJson()
 	}
 	if err != nil {
-		if !*debugpr {
+		if !*emulation {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды начать проверку марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры sendCheckOfMark c ошибкой", err)
@@ -653,7 +682,7 @@ func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits str
 	logginInFile(logstr)
 	//logsmap[LOGOTHER].Println("comJson", comJson)
 	//logsmap[LOGOTHER].Println("result", result)
-	//if *debugpr {
+	//if *emulation {
 	//}
 	//result := "{\"result\": \"all ok\"}"
 	logginInFile("конец процедуры sendCheckOfMark без ошибки")
@@ -689,7 +718,7 @@ func getStatusOfChecking(fptr *fptr10.IFptr) (string, error) {
 		err = fptr.ProcessJson()
 	}
 	if err != nil {
-		if !*debugpr {
+		if !*emulation {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды принятия марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры getStatusOfChecking c ошибкой", err)
@@ -703,7 +732,7 @@ func getStatusOfChecking(fptr *fptr10.IFptr) (string, error) {
 	}
 	//logsmap[LOGOTHER].Println("comJson", comJson)
 	//logsmap[LOGOTHER].Println("result", result)
-	//if *debugpr {
+	//if *emulation {
 	//}
 	//result := "{\"result\": \"all ok\"}"
 	logginInFile("конец процедуры getStatusOfChecking без ошибки")
@@ -720,7 +749,7 @@ func acceptMark(fptr *fptr10.IFptr) (string, error) {
 		err = fptr.ProcessJson()
 	}
 	if err != nil {
-		if !*debugpr {
+		if !*emulation {
 			desrError := fmt.Sprintf("ошибка (%v) выполнение команды принятия марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры acceptMark c ошибкой", err)
@@ -734,7 +763,7 @@ func acceptMark(fptr *fptr10.IFptr) (string, error) {
 	}
 	//logsmap[LOGOTHER].Println("comJson", comJson)
 	//logsmap[LOGOTHER].Println("result", result)
-	//if *debugpr {
+	//if *emulation {
 	//}
 	logstr := fmt.Sprintf("результат проверки марки (%v) ", result)
 	logginInFile(logstr)
@@ -874,32 +903,58 @@ func successCommand(resulJson string) bool {
 	return res
 } //successCommand
 
-func connectWithKassa(fptr *fptr10.IFptr, comport string) bool {
-	sComPorta := comport
-	if !strings.Contains(comport, "COM") {
-		sComPorta = "COM" + comport
-	}
+func connectWithKassa(fptr *fptr10.IFptr, comportint int, ipaddresskktper, ipaddresssrvkktper string) (bool, string) {
+	//if !strings.Contains(comport, "COM") {
+	//	sComPorta = "COM" + comport
+	//}
+	typeConnect := ""
 	fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_MODEL, strconv.Itoa(fptr10.LIBFPTR_MODEL_ATOL_AUTO))
-	fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_PORT, strconv.Itoa(fptr10.LIBFPTR_PORT_COM))
-	fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_COM_FILE, sComPorta)
-	fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_BAUDRATE, strconv.Itoa(fptr10.LIBFPTR_PORT_BR_115200))
+	if ipaddresssrvkktper != "" {
+		fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_REMOTE_SERVER_ADDR, ipaddresssrvkktper)
+		typeConnect = fmt.Sprintf("через сервер ККТ по IP %v", ipaddresssrvkktper)
+	}
+	if comportint == 0 {
+		if ipaddresskktper != "" {
+			fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_IPADDRESS, ipaddresskktper)
+			typeConnect = fmt.Sprintf("%v по IP %v ККТ", typeConnect, ipaddresskktper)
+		} else {
+			fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_PORT, strconv.Itoa(fptr10.LIBFPTR_PORT_USB))
+			typeConnect = fmt.Sprintf("%v по USB", typeConnect)
+		}
+	} else {
+		sComPorta := "COM" + strconv.Itoa(comportint)
+		typeConnect = fmt.Sprintf("%v по COM порту %v", typeConnect, sComPorta)
+		fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_PORT, strconv.Itoa(fptr10.LIBFPTR_PORT_COM))
+		fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_COM_FILE, sComPorta)
+		fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_BAUDRATE, strconv.Itoa(fptr10.LIBFPTR_PORT_BR_115200))
+	}
 	fptr.ApplySingleSettings()
 	fptr.Open()
-	return fptr.IsOpened()
+	return fptr.IsOpened(), typeConnect
 }
 
-func getCurrentPortOfKass(dirOfJsons string) (string, error) {
+func getCurrentPortOfKass(dirOfJsons string) (int, error) {
+	if *comport > 0 {
+		return *comport, nil
+	}
 	comportb, err := os.ReadFile(dirOfJsons + FILE_NAME_CONNECTION)
 	if err != nil {
 		desrError := fmt.Sprintf("ошибка (%v) октрытия файла с параметрами соедиения кассы", err)
-		logsmap[LOGERROR].Println(desrError)
-		return desrError, err
+		logginInFile(desrError)
+		//logsmap[LOGERROR].Println(desrError)
+		return 0, nil
 	}
-	return string(comportb), nil
+	comportstr := string(comportb)
+	if strings.Contains(comportstr, "COM") {
+		indOfCom := strings.Index(comportstr, "COM")
+		comportstr = comportstr[indOfCom:]
+	}
+	comportint, _ := strconv.Atoi(comportstr)
+	return comportint, nil
 }
 
 func logginInFile(loggin string) {
-	if *debug {
+	if (*LogsDebugs) > 0 {
 		logsmap[LOGINFO].Println(loggin)
 	}
 }
@@ -959,26 +1014,27 @@ func reconnectToKKT(fptr *fptr10.IFptr) error {
 	fmt.Println(fptr.Version())
 	//сединение с кассой
 	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой")
-	comPort, err := getCurrentPortOfKass(DIROFJSONS)
-	if err != nil {
-		desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
-		logsmap[LOGERROR].Println(desrErr)
-		return errors.New(desrErr)
-		//println("Нажмите любую клавишу...")
-		//input.Scan()
-		//log.Panic(desrErr)
-	}
-	if !connectWithKassa(fptr, comPort) {
-		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом на ком порт %v", comPort)
+	*comport, _ = getCurrentPortOfKass(DIROFJSONS)
+	//if err != nil {
+	//	desrErr := fmt.Sprintf("ошибка (%v) чтения параметра com порт соединения с кассой", err)
+	//	logsmap[LOGERROR].Println(desrErr)
+	//	return errors.New(desrErr)
+	//	//println("Нажмите любую клавишу...")
+	//	//input.Scan()
+	//	//log.Panic(desrErr)
+	//}
+	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
+		//if !connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt) {
+		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом %v", typepodkluch)
 		logsmap[LOGERROR].Println(descrErr)
-		if !*debugpr {
+		if !*emulation {
 			return errors.New(descrErr)
 			//println("Нажмите любую клавишу...")
 			//input.Scan()
 			//log.Panic(descrErr)
 		}
 	} else {
-		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", comPort)
+		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
 	}
 	return nil
 	//defer fptr.Close()
