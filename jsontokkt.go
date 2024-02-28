@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -160,6 +161,10 @@ var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток �
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
 var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
 
+var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
+var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
+var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
+
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
 var logsmap map[string]*log.Logger
@@ -170,7 +175,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_25_04"
+const Version_of_program = "2024_02_28_01"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -236,8 +241,11 @@ func main() {
 	logsmap[LOGINFO_WITHSTD].Println("порт кассы", *comport)
 	listOfFilesTempr, err := listDirByReadDir(DIROFJSONS)
 	if err != nil {
-		logsmap[LOGERROR].Printf("ошибка поиска json заданий в директории %v c ошибкой %v", DIROFJSONS, err)
+		descrError := fmt.Sprintf("ошибка (%v) поиска json заданий в директории %v", err, DIROFJSONS)
+		logsmap[LOGERROR].Printf(descrError)
+		log.Panic(descrError)
 	}
+	logginInFile(fmt.Sprintln("listOfFilesTempr=", listOfFilesTempr))
 	var listOfFiles []string
 	countOfFiles := len(listOfFilesTempr)
 	logsmap[LOGINFO_WITHSTD].Println("Всего json файлов", countOfFiles)
@@ -304,6 +312,12 @@ func main() {
 	countPrintedChecks := 0
 	amountOfMistakesChecks := 0
 	amountOfMistakesMarks := 0
+	countPrintedDays := 0
+	initDate, err := time.Parse("2006.01.02", "2006.01.02")
+	if err != nil {
+		logsmap[LOGERROR].Printf("ошибка (%v) инициализации начальной даты", err)
+	}
+	prevDateOfCheck := initDate
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
 	for k, currFullFileName := range listOfFiles {
@@ -325,6 +339,13 @@ func main() {
 			amountOfMistakesChecks = 0
 			amountOfMistakesMarks = 0
 		} else {
+			if *countPrintChecks > 0 {
+				if countPrintedChecks >= *countPrintChecks {
+					desctriptionExit := fmt.Sprintf("произошло завершение работы программы, так как число напечатнных чеков %v равно параметру countchecks, переданному при запуске программы", countPrintedChecks)
+					logsmap[LOGINFO_WITHSTD].Println(desctriptionExit)
+					break //прерываем печать чека
+				}
+			}
 			if *countChecksForPause > 0 {
 				if ((countPrintedChecks + 1) % *countChecksForPause) == 0 {
 					//if ((k + 1) % *countChecksForPause) == 0 {
@@ -336,7 +357,9 @@ func main() {
 			}
 		}
 		//logsmap[LOGINFO_WITHSTD].Println()
-		logginInFile(fmt.Sprintln("command", command))
+		if command != "" {
+			logginInFile(fmt.Sprintln("command", command))
+		}
 		if command == "off/on" {
 			command = ""
 			logsmap[LOGINFO_WITHSTD].Println("переподключение к кассовому аппарату...")
@@ -347,7 +370,7 @@ func main() {
 			}
 		}
 		currNumIsprChecka := getFDFromFileName(currFullFileName)
-		logsmap[LOGINFO_WITHSTD].Printf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName)
+		logginInFile(fmt.Sprintf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName))
 		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
 		logginInFile(logstr)
 		jsonCorrection, err := readJsonFromFile(currFullFileName)
@@ -360,7 +383,7 @@ func main() {
 		logstr = fmt.Sprintf("прочитали json файл %v", currFullFileName)
 		logginInFile(logstr)
 		//ищем марки в чеке
-		logginInFile("ищем марки в чеке")
+		logginInFile("парсим json задание")
 		existMarksInCheck := false
 		err = json.Unmarshal([]byte(jsonCorrection), &receipt)
 		if err != nil {
@@ -369,6 +392,34 @@ func main() {
 			amountOfMistakesChecks++
 			continue
 		}
+		//logsmap[LOGINFO_WITHSTD].Println("receipt.CorrectionBaseDate=", receipt.CorrectionBaseDate)
+		currDateOfCheck, err := time.Parse("2006.01.02", receipt.CorrectionBaseDate) //yyyy.mm.dd
+		if err != nil {
+			errorDescr := fmt.Sprintf("ошибка (%v) парсинга даты %v для чека %v", err, receipt.CorrectionBaseDate, currFullFileName)
+			logsmap[LOGERROR].Println(errorDescr)
+		}
+		//logsmap[LOGINFO_WITHSTD].Println("prevDateOfCheck=", prevDateOfCheck, "currDateOfCheck=", currDateOfCheck, "prevDateOfCheck != currDateOfCheck", prevDateOfCheck != currDateOfCheck)
+		if prevDateOfCheck != currDateOfCheck {
+			logginInFile(fmt.Sprintf("переходим на новый день %v", currDateOfCheck))
+			if prevDateOfCheck != initDate {
+				countPrintedDays++
+			}
+			prevDateOfCheck = currDateOfCheck
+		}
+		//может притормозим
+		if *pauseAfterDay > 0 {
+			//if (isDayEnd()) && (countPrintedDays >= *pauseAfterDay) {
+			if countPrintedDays >= *pauseAfterDay {
+				logginInFile(fmt.Sprintf("произошло завершение дня, работы программы поставлена на паузу на %v секунд", *pauseInSecondsAfterDay))
+				logginInFile(fmt.Sprintf("делаем паузу в программе через каждые %v дней для возможной остановки на %v секунд...", *pauseAfterDay, *pauseInSecondsAfterDay))
+				logsmap[LOGINFO_WITHSTD].Printf("если процесс печати чеков нужно прервать, то это можно сделать сейчас - так как сейчас программа перешла на следующий %v день", prevDateOfCheck)
+				countPrintedDays = 0
+				duration := time.Second * time.Duration((*pauseInSecondsAfterDay))
+				time.Sleep(duration)
+			}
+		}
+		logsmap[LOGINFO_WITHSTD].Printf("%v: обработка задания %v из %v %v", receipt.CorrectionBaseDate, k+1, countOfFiles, currFullFileName)
+		logginInFile("ищем марки в чеке")
 		//очищаем таблицу марок
 		if *clearTableOfMarks {
 			logginInFile("очищаем таблицу марок")
@@ -495,8 +546,9 @@ func main() {
 			}
 			file_printed_checks.WriteString(currNumIsprChecka + "\n")
 		} else {
-			logsmap[LOGERROR].Printf("ошибка (%v) печати чека на ККТ", resulOfCommand)
-			logginInFile(fmt.Sprintf("ошибка (%v) печати чека на ККТ", resulOfCommand))
+			descrError := fmt.Sprintf("ошибка (%v) печати чека %v атол", resulOfCommand, currFullFileName)
+			logsmap[LOGERROR].Printf(descrError)
+			logginInFile(descrError)
 			amountOfMistakesChecks++
 		}
 		if amountOfMistakesChecks > 0 {
@@ -774,6 +826,7 @@ func acceptMark(fptr *fptr10.IFptr) (string, error) {
 
 func listDirByReadDir(path string) ([]string, error) {
 	var spisFiles []string
+	var spisFileFD []int
 	logstr := fmt.Sprintf("перебор файлов в директории %v--BEGIN\n", path)
 	logginInFile(logstr)
 	defer logginInFile(fmt.Sprintf("перебор файлов в директории %v--END\n", path))
@@ -812,7 +865,34 @@ func listDirByReadDir(path string) ([]string, error) {
 			spisFiles = append(spisFiles, val.Name())
 		}
 	}
-	return spisFiles, nil
+	logginInFile(fmt.Sprintln("spisFiles=", spisFiles))
+	for _, filename := range spisFiles {
+		fdstr := getFDFromFileName(filename)
+		fdint, err := strconv.Atoi(fdstr)
+		if err != nil {
+			logginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
+			return spisFiles, err
+			//continue
+		}
+		spisFileFD = append(spisFileFD, fdint)
+	}
+	var spisResOfFiles []string
+	sort.Ints(spisFileFD)
+	for _, fdint := range spisFileFD {
+		for _, filename := range spisFiles {
+			fdstr := getFDFromFileName(filename)
+			fdintFile, err := strconv.Atoi(fdstr)
+			if err != nil {
+				logginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
+				return spisFiles, err
+				//continue
+			}
+			if fdint == fdintFile {
+				spisResOfFiles = append(spisResOfFiles, filename)
+			}
+		}
+	}
+	return spisResOfFiles, nil
 } //listDirByReadDir
 
 func doesFileExist(fullFileName string) (found bool, err error) {
@@ -884,12 +964,12 @@ func readJsonFromFile(currFullFileName string) (string, error) {
 	logstr := fmt.Sprintln("начало процедуры readJsonFromFile чтения файла", currFullFileName)
 	logginInFile(logstr)
 	plan, err := ioutil.ReadFile(currFullFileName)
-	logstr = fmt.Sprintln("plan", plan)
-	logginInFile(logstr)
-	logstr = fmt.Sprintln("error", err)
-	logginInFile(logstr)
-	logstr = fmt.Sprintln("конец процедуры readJsonFromFile")
-	logginInFile(logstr)
+	//logstr = fmt.Sprintln("plan", plan)
+	//logginInFile(logstr)
+	//logstr = fmt.Sprintln("error", err)
+	//logginInFile(logstr)
+	//logstr = fmt.Sprintln("конец процедуры readJsonFromFile")
+	//logginInFile(logstr)
 	return string(plan), err
 }
 
