@@ -422,6 +422,11 @@ func main() {
 		logginInFile("ищем марки в чеке")
 		//очищаем таблицу марок
 		if *clearTableOfMarks {
+			logginInFile("прерываемм проверку марки")
+			turnCheckMarkJson := "{\"type\": \"cancelMarkingCodeValidation\"}"
+			resturnCheckMark, _ := sendComandeAndGetAnswerFromKKT(fptr, turnCheckMarkJson)
+			logstr = fmt.Sprintf("результат прерывания проверки марки: %v", resturnCheckMark)
+			logginInFile(logstr)
 			logginInFile("очищаем таблицу марок")
 			clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
 			resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
@@ -648,9 +653,16 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 			return TItemInfoCheckResult{}, errors.New(errorDescr)
 		}
 		if !successCommand(resJson) {
-			errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", resJson, mark)
-			logsmap[LOGERROR].Println(errorDescr)
-			return TItemInfoCheckResult{}, errors.New(errorDescr)
+			//делаем паузу
+			logginInFile(resJson)
+			desrAction := "пауза в 1 минуту... так сервер провекри марок не успевает."
+			logsmap[LOGINFO_WITHSTD].Println(desrAction)
+			duration := time.Second * 60
+			time.Sleep(duration)
+			//if strings.Contains(resJson, "421")
+			//errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", resJson, mark)
+			//logsmap[LOGERROR].Println(errorDescr)
+			//return TItemInfoCheckResult{}, errors.New(errorDescr)
 		}
 		err = json.Unmarshal([]byte(resJson), &answerOfCheckMark)
 		if err != nil {
@@ -771,7 +783,7 @@ func getStatusOfChecking(fptr *fptr10.IFptr) (string, error) {
 	}
 	if err != nil {
 		if !*emulation {
-			desrError := fmt.Sprintf("ошибка (%v) выполнение команды принятия марки на кассовом аппарате", err)
+			desrError := fmt.Sprintf("ошибка (%v) выполнение команды получения статуса марки на кассовом аппарате", err)
 			logsmap[LOGERROR].Println(desrError)
 			logstr := fmt.Sprint("конец процедуры getStatusOfChecking c ошибкой", err)
 			logginInFile(logstr)
