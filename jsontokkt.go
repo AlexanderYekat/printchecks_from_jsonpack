@@ -157,6 +157,7 @@ var ipaddresskkt = flag.String("ipkkt", "", "ip адрес ккт")
 var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервера ккт")
 var emulation = flag.Bool("emul", false, "эмуляция")
 var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
+var emulatmistakesmarks = flag.Bool("emulmistmark", false, "эмуляция ошибок марок")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
 var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
@@ -164,6 +165,8 @@ var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошиб�
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
 var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
+
+var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
 var LOGSDIR = "./logs/"
 var filelogmap map[string]*os.File
@@ -175,7 +178,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_02_28_01"
+const Version_of_program = "2024_03_01_05"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -320,8 +323,16 @@ func main() {
 	prevDateOfCheck := initDate
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
+	previusWasMarks := false
+	ExlusionDateDate, err := time.Parse("2006.01.02", *ExlusionDate)
+	if err != nil {
+		logsmap[LOGERROR].Printf("ошибка (%v) инициализации даты исключения", err)
+		*ExlusionDate = ""
+	}
 	for k, currFullFileName := range listOfFiles {
 		var receipt TCorrectionCheck
+		globalMistake := false
+		globalErrorStr := ""
 		command := ""
 		if amountOfMistakesChecks >= *countOfMistakesCheckForStop {
 			descrError := "превышено количество ошибок чеков, остановка работы программы"
@@ -398,6 +409,14 @@ func main() {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга даты %v для чека %v", err, receipt.CorrectionBaseDate, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 		}
+		if *ExlusionDate != "" {
+			if ExlusionDateDate == currDateOfCheck {
+				desrExit := fmt.Sprintf("достигли даты %v исключения - завершаем работы программы ", *ExlusionDate)
+				logsmap[LOGINFO_WITHSTD].Println(desrExit)
+				//logginInFile(fmt.Sprintf(" %v", receipt.CorrectionBaseDate))
+				break
+			}
+		}
 		//logsmap[LOGINFO_WITHSTD].Println("prevDateOfCheck=", prevDateOfCheck, "currDateOfCheck=", currDateOfCheck, "prevDateOfCheck != currDateOfCheck", prevDateOfCheck != currDateOfCheck)
 		if prevDateOfCheck != currDateOfCheck {
 			logginInFile(fmt.Sprintf("переходим на новый день %v", currDateOfCheck))
@@ -421,81 +440,57 @@ func main() {
 		logsmap[LOGINFO_WITHSTD].Printf("%v: обработка задания %v из %v %v", receipt.CorrectionBaseDate, k+1, countOfFiles, currFullFileName)
 		logginInFile("ищем марки в чеке")
 		//очищаем таблицу марок
-		if *clearTableOfMarks {
-			logginInFile("прерываемм проверку марки")
-			turnCheckMarkJson := "{\"type\": \"cancelMarkingCodeValidation\"}"
-			resturnCheckMark, _ := sendComandeAndGetAnswerFromKKT(fptr, turnCheckMarkJson)
-			logstr = fmt.Sprintf("результат прерывания проверки марки: %v", resturnCheckMark)
-			logginInFile(logstr)
-			logginInFile("очищаем таблицу марок")
-			clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
-			resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
-			logstr = fmt.Sprintf("результат очистки таблицы марок: %v", resClearTableMarks)
-			logginInFile(logstr)
+		if (*clearTableOfMarks) && (previusWasMarks) {
+			breakProcCheckOfMark(fptr)
+			clearTanlesOfMarks(fptr)
 		}
+		previusWasMarks = false
 		//читаем данные по маркам
 		mistakeCheckingMark := false
-		for _, v := range receipt.Items {
-			typeItem := v.(map[string]interface{})["type"]
-			if typeItem != "position" {
-				continue
-			}
-			LocImcParams, ok := v.(map[string]interface{})["imcParams"]
-			if !ok {
-				continue
-			}
-			currMarkBase64interface, ok := LocImcParams.(map[string]interface{})["imc"]
-			if !ok {
-				continue
-			}
-			currMarkBase64 := currMarkBase64interface.(string)
-			if currMarkBase64 == "" {
-				continue
-			}
-			existMarksInCheck = true
-			//QuantityPosInterface := v.(map[string]interface{})["quantity"]
-			//MeasureUnitInterface := v.(map[string]interface{})["measurementUnit"]
-			//QuantityPos := QuantityPosInterface.(float64)
-			//MeasureUnit := MeasureUnitInterface.(string)
-			logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, currFullFileName)
-			logsmap[LOGINFO_WITHSTD].Println(logstr)
-			//logginInFile(logstr)
-			imcResultCheckin, err := runProcessCheckMark(fptr, currMarkBase64, 0, "")
-			if err != nil {
-				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", err, currMarkBase64, currFullFileName)
-				logsmap[LOGERROR].Println(errorDescr)
-				mistakeCheckingMark = true
-				break
-			}
-			//v.(map[string]interface{})["mark"] = ""
-			logsmap[LOGINFO_WITHSTD].Println("марка успешно проверена")
-			//заполняем данные о марке
-			logginInFile("заполняем данные о марке")
-			//v.(map[string]interface{})["imcParams"] = new(TImcParams)
-			//ImcParams := v.(map[string]interface{})["ImcParams"].(*TImcParams)
-			ImcParams := LocImcParams.(map[string]interface{})
-			ImcParams["imc"] = currMarkBase64
-			ImcParams["imcModeProcessing"] = 0
-			ImcParams["itemEstimatedStatus"] = "itemStatusUnchanged"
-			ImcParams["imcType"] = "auto"
-			ImcParams["itemInfoCheckResult"] = new(TItemInfoCheckResult)
-			ItemInfoCheckResult := ImcParams["itemInfoCheckResult"].(*TItemInfoCheckResult)
-			ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
-			ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
-			ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
-			ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
-			//mcParams.Imc = currMarkBase64
-			//ImcParams.ImcModeProcessing = 0
-			//ImcParams.ItemEstimatedStatus = "itemStatusUnchanged"
-			//ImcParams.ImcType = "auto"
-			//ImcParams.ItemInfoCheckResult = new(TItemInfoCheckResult)
-			//ImcParams.ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
-			//ImcParams.ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
-			//ImcParams.ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
-			//ImcParams.ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
+		markErroDescr := ""
+		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, receipt, currFullFileName, true, 60)
+		if existMarksInCheck {
+			previusWasMarks = true
+		}
+		if (*emulatmistakesmarks) && (existMarksInCheck) {
+			markErroDescr = "эмуляция ошибки всего процесса проверки марок чека"
+			mistakeCheckingMark = true
 		}
 		if mistakeCheckingMark {
-			errorDescr := fmt.Sprintf("ошибка проверки марки для чека %v атол", currFullFileName)
+			//очищаем все предыдущие провекри
+			logsmap[LOGINFO_WITHSTD].Printf("перезапускаем процесс провекри марок для всего чека, так как была ошибкаЖ %v...", markErroDescr)
+			breakProcCheckOfMark(fptr)
+			clearTanlesOfMarks(fptr)
+			//отключаемся от ККТ
+			logsmap[LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
+			disconnectWithKKT(fptr, true)
+			//делаем паузу
+			logsmap[LOGINFO_WITHSTD].Printf("делаем паузу в %v секунд...", 60)
+			duration := time.Second * time.Duration(60)
+			time.Sleep(duration)
+			//подключаемся к ККТ
+			logsmap[LOGINFO_WITHSTD].Println("подключаемся к ККТ")
+			_, err := connectToKKT(fptr, true)
+			if err != nil {
+				descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
+				logsmap[LOGERROR].Println(descrError)
+				globalErrorStr = descrError
+				globalMistake = true
+				break
+			}
+			//запускаем проверку марки заново
+			logginInFile("снова запускаем проверку марки")
+			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, receipt, currFullFileName, true, 60)
+		}
+		if globalMistake {
+			errorDescr := fmt.Sprintf("ошибка %v", globalErrorStr)
+			logsmap[LOGERROR].Println(errorDescr)
+			amountOfMistakesChecks++
+			//amountOfMistakesMarks++
+			break
+		}
+		if mistakeCheckingMark {
+			errorDescr := fmt.Sprintf("ошибка (%v) проверки марки для чека %v атол", markErroDescr, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
 			amountOfMistakesChecks++
 			amountOfMistakesMarks++
@@ -582,6 +577,94 @@ func dialogContinuePrintChecks() (bool, string) {
 		res, _ = getBoolFromString(input.Text(), res)
 	}
 	return res, command
+}
+
+func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, receipt TCorrectionCheck, FullFileName string, perezapuskatproverku bool, pausetimesec int) (TCorrectionCheck, bool, bool, string, bool, string) {
+	logginInFile("ищем марки в чеке")
+	//читаем данные по маркам
+	mistakeCheckingMark := false
+	errorDescr := ""
+	existMarksInCheck := false
+	globalMistake := false
+	globalErrorStr := ""
+	for _, v := range receipt.Items {
+		typeItem := v.(map[string]interface{})["type"]
+		if typeItem != "position" {
+			continue
+		}
+		LocImcParams, ok := v.(map[string]interface{})["imcParams"]
+		if !ok {
+			continue
+		}
+		currMarkBase64interface, ok := LocImcParams.(map[string]interface{})["imc"]
+		if !ok {
+			continue
+		}
+		currMarkBase64 := currMarkBase64interface.(string)
+		if currMarkBase64 == "" {
+			continue
+		}
+		existMarksInCheck = true
+		logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, FullFileName)
+		logsmap[LOGINFO_WITHSTD].Println(logstr)
+		imcResultCheckin, errproc := runProcessCheckMark(fptr, currMarkBase64, 0, "")
+		if *emulatmistakesmarks {
+			errproc = errors.New("симуляция ошибки провекри марки")
+		}
+		if errproc != nil {
+			//прерываем проверку
+			if perezapuskatproverku {
+				errorDescr = fmt.Sprintf("будет произведен перезпуск провекри марки, так как была ошибка (%v) запуска проверки марки %v для чека %v атол", errproc, currMarkBase64, FullFileName)
+				logsmap[LOGINFO_WITHSTD].Println(errorDescr)
+				//***********************************
+				logginInFile(fmt.Sprintf("перезапускаем проверку марки %v...", currMarkBase64))
+				logsmap[LOGINFO_WITHSTD].Println("перезапускаем проверку марки...")
+				//прерываем предыдущую провекру марки
+				breakProcCheckOfMark(fptr)
+				//отключаемся от ККТ
+				logsmap[LOGINFO_WITHSTD].Println("отключаемся от ККТ")
+				disconnectWithKKT(fptr, true)
+				//делаем паузу
+				logsmap[LOGINFO_WITHSTD].Printf("пауза в %v секунд...", pausetimesec)
+				duration := time.Second * time.Duration(pausetimesec)
+				time.Sleep(duration)
+				//подключаемся к ККТ
+				logsmap[LOGINFO_WITHSTD].Println("подлкючаемся к ККТ")
+				_, err := connectToKKT(fptr, true)
+				if err != nil {
+					descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
+					logsmap[LOGERROR].Println(descrError)
+					globalErrorStr = descrError
+					globalMistake = true
+					break
+				}
+				//запускаем проверку марки заново
+				logginInFile("снова запускаем проверку марки")
+				imcResultCheckin, errproc = runProcessCheckMark(fptr, currMarkBase64, 0, "")
+			} //перезапуск провекри марки
+			if errproc != nil {
+				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", errproc, currMarkBase64, FullFileName)
+				logsmap[LOGERROR].Println(errorDescr)
+				mistakeCheckingMark = true
+				break
+			}
+		}
+		logsmap[LOGINFO_WITHSTD].Println("марка успешно проверена")
+		//заполняем данные о марке
+		logginInFile("заполняем данные о марке")
+		ImcParams := LocImcParams.(map[string]interface{})
+		ImcParams["imc"] = currMarkBase64
+		ImcParams["imcModeProcessing"] = 0
+		ImcParams["itemEstimatedStatus"] = "itemStatusUnchanged"
+		ImcParams["imcType"] = "auto"
+		ImcParams["itemInfoCheckResult"] = new(TItemInfoCheckResult)
+		ItemInfoCheckResult := ImcParams["itemInfoCheckResult"].(*TItemInfoCheckResult)
+		ItemInfoCheckResult.ImcCheckFlag = imcResultCheckin.ImcCheckFlag
+		ItemInfoCheckResult.ImcCheckResult = imcResultCheckin.ImcCheckResult
+		ItemInfoCheckResult.ImcStatusInfo = imcResultCheckin.ImcStatusInfo
+		ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
+	}
+	return receipt, existMarksInCheck, mistakeCheckingMark, errorDescr, globalMistake, globalErrorStr
 }
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
@@ -671,7 +754,7 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 			return TItemInfoCheckResult{}, errors.New(errorDescr)
 		}
 		if answerOfCheckMark.Ready {
-			if (*emulation) && (countAttempts < *countOfCheckingMarks-18) {
+			if (*emulation) && (countAttempts < *countOfCheckingMarks-20) {
 				//емулируем задержку полчение марки
 			} else {
 				break
@@ -713,6 +796,24 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 	logginInFile("конец процедуры runProcessCheckMark без ошибки")
 	return imcResultCheckin, nil
 } //runProcessCheckMark
+
+func breakProcCheckOfMark(fptr *fptr10.IFptr) error {
+	var err error
+	logginInFile("прерываемм проверку марки")
+	turnCheckMarkJson := "{\"type\": \"cancelMarkingCodeValidation\"}"
+	resturnCheckMark, _ := sendComandeAndGetAnswerFromKKT(fptr, turnCheckMarkJson)
+	logginInFile(fmt.Sprintf("результат прерывания проверки марки: %v", resturnCheckMark))
+	return err
+}
+
+func clearTanlesOfMarks(fptr *fptr10.IFptr) error {
+	var err error
+	logginInFile("очищаем таблицу марок")
+	clearTableMarksJson := "{\"type\": \"clearMarkingCodeValidationResult\"}"
+	resClearTableMarks, _ := sendComandeAndGetAnswerFromKKT(fptr, clearTableMarksJson)
+	logginInFile(fmt.Sprintf("результат очистки таблицы марок: %v", resClearTableMarks))
+	return err
+}
 
 func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (string, error) {
 	var err error
@@ -1088,6 +1189,39 @@ func getBoolFromString(val string, onErrorDefault bool) (bool, error) {
 		}
 	}
 	return res, err
+}
+
+func connectToKKT(fptr *fptr10.IFptr, createComObj bool) (string, error) {
+	var err error
+	logginInFile("снова создаём объект драйвера...")
+	if createComObj {
+		fptr, err = fptr10.NewSafe()
+	}
+	if err != nil {
+		descrError := fmt.Sprintf("ошибка (%v) инициализации драйвера ККТ атол", err)
+		logsmap[LOGERROR].Println(descrError)
+		return descrError, errors.New(descrError)
+	}
+	//сединение с кассой
+	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой...")
+	*comport, _ = getCurrentPortOfKass(DIROFJSONS)
+	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
+		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом %v", typepodkluch)
+		logsmap[LOGERROR].Println(descrErr)
+		if !*emulation {
+			return descrErr, errors.New(descrErr)
+		}
+	} else {
+		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
+	}
+	return "", nil
+}
+
+func disconnectWithKKT(fptr *fptr10.IFptr, destroyComObject bool) {
+	fptr.Close()
+	if destroyComObject {
+		fptr.Destroy()
+	}
 }
 
 func reconnectToKKT(fptr *fptr10.IFptr) error {
