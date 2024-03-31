@@ -186,6 +186,8 @@ const FILE_NAME_CONNECTION = "connection.txt"
 func main() {
 	var err error
 	var descrError string
+	var ExlusionDateDate time.Time
+	var lastNameOfKassir string
 
 	runDescription := "программа версии " + Version_of_program + " распечатка чеков из json заданий запущена"
 	fmt.Println(runDescription)
@@ -324,10 +326,12 @@ func main() {
 	logsmap[LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
 	logsmap[LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
 	previusWasMarks := false
-	ExlusionDateDate, err := time.Parse("2006.01.02", *ExlusionDate)
-	if err != nil {
-		logsmap[LOGERROR].Printf("ошибка (%v) инициализации даты исключения", err)
-		*ExlusionDate = ""
+	if *ExlusionDate != "" {
+		ExlusionDateDate, err = time.Parse("2006.01.02", *ExlusionDate)
+		if err != nil {
+			logsmap[LOGERROR].Printf("ошибка (%v) инициализации даты исключения", err)
+			*ExlusionDate = ""
+		}
 	}
 	for k, currFullFileName := range listOfFiles {
 		var receipt TCorrectionCheck
@@ -403,6 +407,7 @@ func main() {
 			amountOfMistakesChecks++
 			continue
 		}
+		lastNameOfKassir = receipt.Operator.Name
 		//logsmap[LOGINFO_WITHSTD].Println("receipt.CorrectionBaseDate=", receipt.CorrectionBaseDate)
 		currDateOfCheck, err := time.Parse("2006.01.02", receipt.CorrectionBaseDate) //yyyy.mm.dd
 		if err != nil {
@@ -546,6 +551,10 @@ func main() {
 			}
 			file_printed_checks.WriteString(currNumIsprChecka + "\n")
 		} else {
+			if strings.Contains(strings.ToUpper(resulOfCommand), strings.ToUpper("исчерпан")) {
+				//закрываем, открываем смену
+				checkOpenShift(fptr, true, lastNameOfKassir)
+			}
 			descrError := fmt.Sprintf("ошибка (%v) печати чека %v атол", resulOfCommand, currFullFileName)
 			logsmap[LOGERROR].Printf(descrError)
 			logginInFile(descrError)
@@ -607,7 +616,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, receipt TCorrectionChe
 		existMarksInCheck = true
 		logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, FullFileName)
 		logsmap[LOGINFO_WITHSTD].Println(logstr)
-		imcResultCheckin, errproc := runProcessCheckMark(fptr, currMarkBase64, 0, "")
+		imcResultCheckin, errproc := runProcessCheckMark(fptr, currMarkBase64)
 		if *emulatmistakesmarks {
 			errproc = errors.New("симуляция ошибки провекри марки")
 		}
@@ -640,7 +649,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, receipt TCorrectionChe
 				}
 				//запускаем проверку марки заново
 				logginInFile("снова запускаем проверку марки")
-				imcResultCheckin, errproc = runProcessCheckMark(fptr, currMarkBase64, 0, "")
+				imcResultCheckin, errproc = runProcessCheckMark(fptr, currMarkBase64)
 			} //перезапуск провекри марки
 			if errproc != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", errproc, currMarkBase64, FullFileName)
@@ -695,7 +704,7 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 	return result, nil
 }
 
-func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (TItemInfoCheckResult, error) {
+func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (TItemInfoCheckResult, error) {
 	var countAttempts int
 	type TItemInfoCheckResultObject struct {
 		ItemInfoCheckResult TItemInfoCheckResult `json:"itemInfoCheckResult"`
@@ -716,7 +725,7 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits
 	//	return TItemInfoCheckResult{}, errors.New(errorDescr)
 	//}
 	//посылаем запрос на проверку марки
-	resJson, err := sendCheckOfMark(fptr, mark, qnt, itemUnits)
+	resJson, err := sendCheckOfMark(fptr, mark)
 	if err != nil {
 		errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v", err, mark)
 		logsmap[LOGERROR].Println(errorDescr)
@@ -815,11 +824,11 @@ func clearTanlesOfMarks(fptr *fptr10.IFptr) error {
 	return err
 }
 
-func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits string) (string, error) {
+func sendCheckOfMark(fptr *fptr10.IFptr, mark string) (string, error) {
 	var err error
 	logginInFile("начало процедуры sendCheckOfMark")
 	//return "", nil
-	comJson, err := getJsonOfBeginCheck(mark, qnt, itemUnits)
+	comJson, err := getJsonOfBeginCheck(mark)
 	if err != nil {
 		desrError := fmt.Sprintf("ошибка (%v) фоормирования json задания проверки марки", err)
 		logsmap[LOGERROR].Println(desrError)
@@ -854,7 +863,7 @@ func sendCheckOfMark(fptr *fptr10.IFptr, mark string, qnt float64, itemUnits str
 	return result, nil
 }
 
-func getJsonOfBeginCheck(mark string, qnt float64, itemUnits string) (string, error) {
+func getJsonOfBeginCheck(mark string) (string, error) {
 	var begMarkStructur TBeginTaskMarkCheck
 	begMarkStructur.Type = "beginMarkingCodeValidation"
 	begMarkStructur.Params.Imc = mark
@@ -1041,7 +1050,7 @@ func initializationLogs(clearLogs bool, logstrs ...string) (map[string]*os.File,
 func printedCheck(dirjsons, numerChecka string) (bool, error) {
 	//file_printed_checks, err := os.OpenFile(DIROFJSONS+"\\"+FILE_NAME_PRINTED_CHECKS, flagsTempOpen)
 	res := false
-	file_printed_checks, err := os.Open(DIROFJSONS + FILE_NAME_PRINTED_CHECKS)
+	file_printed_checks, err := os.Open(dirjsons + FILE_NAME_PRINTED_CHECKS)
 	if err != nil {
 		return res, err
 	}
@@ -1266,7 +1275,7 @@ func reconnectToKKT(fptr *fptr10.IFptr) error {
 	//defer fptr.Close()
 }
 
-/* func checkOpenShift(fptr *fptr10.IFptr, openShiftIfClose bool, kassir string) (bool, error) {
+func checkOpenShift(fptr *fptr10.IFptr, openShiftIfClose bool, kassir string) (bool, error) {
 	logginInFile("получаем статус ККТ")
 	getStatusKKTJson := "{\"type\": \"getDeviceStatus\"}"
 	resgetStatusKKT, err := sendComandeAndGetAnswerFromKKT(fptr, getStatusKKTJson)
@@ -1320,4 +1329,3 @@ func reconnectToKKT(fptr *fptr10.IFptr) error {
 	}
 	return true, nil
 } //checkOpenShift
-*/
