@@ -145,6 +145,9 @@ type TCorrectionCheck struct {
 
 var DIROFJSONS = ".\\jsons\\works\\"
 
+var kassatype = flag.String("kassatype", "atol", "касса (atol - атол, merc - меркурий)")
+var IpMerc = flag.String("ipMerc", "localhost", "ip адрес сервера Меркурия")
+var PortMerc = flag.Int("PortMerc", 50009, "порт сервера Меркурия")
 var dirOfjsons = flag.String("dirjsons", ".\\jsons\\works\\", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
 var countChecksForPause = flag.Int("countforpause", 0, "число чеков, после которых программа делает небольшую паузу")
@@ -154,6 +157,7 @@ var comport = flag.Int("com", 0, "ком порт кассы")
 var emailforcheck = flag.String("email", "", "email клиента чека")
 var PrintCheckOnKKT = flag.String("print", "", "печтать или не печатать чек на ККТ: true - печатать, false - не печетать")
 var ipaddresskkt = flag.String("ipkkt", "", "ip адрес ккт")
+var portkktatol = flag.Int("portipkkt", 0, "порт ip ккт")
 var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервера ккт")
 var emulation = flag.Bool("emul", false, "эмуляция")
 var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
@@ -161,6 +165,7 @@ var emulatmistakesmarks = flag.Bool("emulmistmark", false, "эмуляция о�
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
 var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
+var pauseOfMarksMistake = flag.Int("pause_mist", 10, "пауза между проблемами с марками")
 
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
@@ -178,7 +183,7 @@ const LOGERROR = "error"
 const LOGSKIP_LINES = "skip_line"
 const LOGOTHER = "other"
 const LOG_PREFIX = "TASKS"
-const Version_of_program = "2024_03_01_05"
+const Version_of_program = "2024_04_11_01"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
@@ -188,6 +193,7 @@ func main() {
 	var descrError string
 	var ExlusionDateDate time.Time
 	var lastNameOfKassir string
+	var fptr *fptr10.IFptr
 
 	runDescription := "программа версии " + Version_of_program + " распечатка чеков из json заданий запущена"
 	fmt.Println(runDescription)
@@ -272,31 +278,34 @@ func main() {
 		//logsmap[LOGINFO_WITHSTD].Printf("%v = %v\n", k+1, currFullFileName)
 	}
 	countOfFiles = len(listOfFiles)
-	logsmap[LOGINFO_WITHSTD].Println("инициализация драйвера атол")
-	fptr, err := fptr10.NewSafe()
-	if err != nil {
-		descrError := fmt.Sprintf("Ошибка (%v) инициализации драйвера ККТ атол", err)
-		logsmap[LOGERROR].Println(descrError)
-		println("Нажмите любую клавишу...")
-		input.Scan()
-		log.Panic(descrError)
-	}
-	defer fptr.Destroy()
-	fmt.Println(fptr.Version())
-	//сединение с кассой
-	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой")
-	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
-		descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом %v", typepodkluch)
-		logsmap[LOGERROR].Println(descrErr)
-		if !*emulation {
+	if *kassatype == "atol" {
+		logsmap[LOGINFO_WITHSTD].Println("Тип кассы atol")
+		logsmap[LOGINFO_WITHSTD].Println("инициализация драйвера атол")
+		fptr, err = fptr10.NewSafe()
+		if err != nil {
+			descrError := fmt.Sprintf("Ошибка (%v) инициализации драйвера ККТ атол", err)
+			logsmap[LOGERROR].Println(descrError)
 			println("Нажмите любую клавишу...")
 			input.Scan()
-			log.Panic(descrErr)
+			log.Panic(descrError)
 		}
-	} else {
-		logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
+		defer fptr.Destroy()
+		fmt.Println(fptr.Version())
+		//сединение с кассой
+		logsmap[LOGINFO_WITHSTD].Println("соединение с кассой")
+		if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *portkktatol, *ipaddressservrkkt); !ok {
+			descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом %v", typepodkluch)
+			logsmap[LOGERROR].Println(descrErr)
+			if !*emulation {
+				println("Нажмите любую клавишу...")
+				input.Scan()
+				log.Panic(descrErr)
+			}
+		} else {
+			logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
+		}
+		defer fptr.Close()
 	}
-	defer fptr.Close()
 	//jsonAnswer, err := sendComandeAndGetAnswerFromKKT(fptr, string(d.Body))
 	//jsonAnswer, err := sendComandeAndGetAnswerFromKKT(fptr, "{\"type\": \"openShift\"}")
 	//fmt.Println(jsonAnswer)
@@ -378,10 +387,12 @@ func main() {
 		if command == "off/on" {
 			command = ""
 			logsmap[LOGINFO_WITHSTD].Println("переподключение к кассовому аппарату...")
-			err := reconnectToKKT(fptr)
-			if err != nil {
-				logsmap[LOGERROR].Printf("ошибка переподключения к ККТ %v", err)
-				break
+			if *kassatype == "atol" {
+				err := reconnectToKKT(fptr)
+				if err != nil {
+					logsmap[LOGERROR].Printf("ошибка переподключения к ККТ %v", err)
+					break
+				}
 			}
 		}
 		currNumIsprChecka := getFDFromFileName(currFullFileName)
@@ -446,14 +457,23 @@ func main() {
 		logginInFile("ищем марки в чеке")
 		//очищаем таблицу марок
 		if (*clearTableOfMarks) && (previusWasMarks) {
-			breakProcCheckOfMark(fptr)
-			clearTanlesOfMarks(fptr)
+			if *kassatype == "atol" {
+				breakProcCheckOfMark(fptr)
+				clearTanlesOfMarks(fptr)
+			} else {
+				//mercyr меркурий
+				//b := getJsonMercStopProcessMarks()
+				//sendtcp.SendCommandTCPMerc(b, *IpMerc, *PortMerc)
+				//b = getJsonClearMarks()
+				//sendtcp.SendCommandTCPMerc(b, *IpMerc, *PortMerc)
+			}
 		}
 		previusWasMarks = false
 		//читаем данные по маркам
 		mistakeCheckingMark := false
 		markErroDescr := ""
-		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, receipt, currFullFileName, true, 60)
+		//if *kassatype == "atol" {
+		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, 60)
 		if existMarksInCheck {
 			previusWasMarks = true
 		}
@@ -464,28 +484,34 @@ func main() {
 		if mistakeCheckingMark {
 			//очищаем все предыдущие провекри
 			logsmap[LOGINFO_WITHSTD].Printf("перезапускаем процесс провекри марок для всего чека, так как была ошибкаЖ %v...", markErroDescr)
-			breakProcCheckOfMark(fptr)
-			clearTanlesOfMarks(fptr)
+			if *kassatype == "atol" {
+				breakProcCheckOfMark(fptr)
+				clearTanlesOfMarks(fptr)
+			}
 			//отключаемся от ККТ
-			logsmap[LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
-			disconnectWithKKT(fptr, true)
+			if *kassatype == "atol" {
+				logsmap[LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
+				disconnectWithKKT(fptr, true)
+			}
 			//делаем паузу
-			logsmap[LOGINFO_WITHSTD].Printf("делаем паузу в %v секунд...", 60)
-			duration := time.Second * time.Duration(60)
+			logsmap[LOGINFO_WITHSTD].Printf("делаем паузу в %v секунд...", *pauseOfMarksMistake)
+			duration := time.Second * time.Duration(*pauseOfMarksMistake)
 			time.Sleep(duration)
 			//подключаемся к ККТ
 			logsmap[LOGINFO_WITHSTD].Println("подключаемся к ККТ")
-			_, err := connectToKKT(fptr, true)
-			if err != nil {
-				descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
-				logsmap[LOGERROR].Println(descrError)
-				globalErrorStr = descrError
-				globalMistake = true
-				break
+			if *kassatype == "atol" {
+				_, err := connectToKKT(fptr, true)
+				if err != nil {
+					descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
+					logsmap[LOGERROR].Println(descrError)
+					globalErrorStr = descrError
+					globalMistake = true
+					break
+				}
 			}
 			//запускаем проверку марки заново
 			logginInFile("снова запускаем проверку марки")
-			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, receipt, currFullFileName, true, 60)
+			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, 60)
 		}
 		if globalMistake {
 			errorDescr := fmt.Sprintf("ошибка %v", globalErrorStr)
@@ -526,7 +552,14 @@ func main() {
 		}
 		logstr = fmt.Sprintf("послыем команду печати чека кассу json файл %v", jsonCorrection)
 		logginInFile(logstr)
-		resulOfCommand, err := sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
+		resulOfCommand := ""
+		if *kassatype == "atol" {
+			resulOfCommand, err = sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
+		} else {
+			//mercuriy //меркурий
+			//jsonCorrection = convertJsonAtolToJsonMerc(jsonCorrection)
+			//resulOfCommand, err = sendComandeAndGetAnswerFromMerc(fptr, jsonCorrection)
+		}
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v атол", err, currFullFileName)
 			logsmap[LOGERROR].Println(errorDescr)
@@ -588,7 +621,7 @@ func dialogContinuePrintChecks() (bool, string) {
 	return res, command
 }
 
-func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, receipt TCorrectionCheck, FullFileName string, perezapuskatproverku bool, pausetimesec int) (TCorrectionCheck, bool, bool, string, bool, string) {
+func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, receipt TCorrectionCheck, FullFileName string, perezapuskatproverku bool, pausetimesec int) (TCorrectionCheck, bool, bool, string, bool, string) {
 	logginInFile("ищем марки в чеке")
 	//читаем данные по маркам
 	mistakeCheckingMark := false
@@ -695,6 +728,20 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 		}
 	}
 	result := fptr.GetParamString(fptr10.LIBFPTR_PARAM_JSON_DATA)
+	if strings.Contains(result, "Нет связи") {
+		logginInFile("нет связи: переподключаемся")
+		if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *portkktatol, *ipaddressservrkkt); !ok {
+			descrErr := fmt.Sprintf("ошибка соединения с кассовым аппаратом %v", typepodkluch)
+			logsmap[LOGERROR].Println(descrErr)
+			if !*emulation {
+				println("Нажмите любую клавишу...")
+				//input.Scan()
+				log.Panic(descrErr)
+			}
+		} else {
+			logsmap[LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
+		}
+	}
 	//logsmap[LOGOTHER].Println("comJson", comJson)
 	//logsmap[LOGOTHER].Println("result", result)
 	//if *emulation {
@@ -836,6 +883,7 @@ func sendCheckOfMark(fptr *fptr10.IFptr, mark string) (string, error) {
 		logginInFile(logstr)
 		return "", err
 	}
+	//comJson = "{\"type\": \"reportX\",\"operator\": {\"name\": \"Иванов\",\"vatin\": \"123654789507\"}}"
 	logstr := fmt.Sprintf("отправляем запрос (%v) на проверку марки", comJson)
 	logginInFile(logstr)
 	fptr.SetParam(fptr10.LIBFPTR_PARAM_JSON_DATA, comJson)
@@ -1105,7 +1153,7 @@ func successCommand(resulJson string) bool {
 	return res
 } //successCommand
 
-func connectWithKassa(fptr *fptr10.IFptr, comportint int, ipaddresskktper, ipaddresssrvkktper string) (bool, string) {
+func connectWithKassa(fptr *fptr10.IFptr, comportint int, ipaddresskktper string, portkktper int, ipaddresssrvkktper string) (bool, string) {
 	//if !strings.Contains(comport, "COM") {
 	//	sComPorta = "COM" + comport
 	//}
@@ -1117,8 +1165,12 @@ func connectWithKassa(fptr *fptr10.IFptr, comportint int, ipaddresskktper, ipadd
 	}
 	if comportint == 0 {
 		if ipaddresskktper != "" {
+			fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_PORT, strconv.Itoa(fptr10.LIBFPTR_PORT_TCPIP))
 			fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_IPADDRESS, ipaddresskktper)
-			typeConnect = fmt.Sprintf("%v по IP %v ККТ", typeConnect, ipaddresskktper)
+			typeConnect = fmt.Sprintf("%v по IP %v ККТ на порт %v", typeConnect, ipaddresskktper, portkktper)
+			if portkktper != 0 {
+				fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_IPPORT, strconv.Itoa(portkktper))
+			}
 		} else {
 			fptr.SetSingleSetting(fptr10.LIBFPTR_SETTING_PORT, strconv.Itoa(fptr10.LIBFPTR_PORT_USB))
 			typeConnect = fmt.Sprintf("%v по USB", typeConnect)
@@ -1214,7 +1266,7 @@ func connectToKKT(fptr *fptr10.IFptr, createComObj bool) (string, error) {
 	//сединение с кассой
 	logsmap[LOGINFO_WITHSTD].Println("соединение с кассой...")
 	*comport, _ = getCurrentPortOfKass(DIROFJSONS)
-	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
+	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *portkktatol, *ipaddressservrkkt); !ok {
 		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом %v", typepodkluch)
 		logsmap[LOGERROR].Println(descrErr)
 		if !*emulation {
@@ -1258,7 +1310,7 @@ func reconnectToKKT(fptr *fptr10.IFptr) error {
 	//	//input.Scan()
 	//	//log.Panic(desrErr)
 	//}
-	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt); !ok {
+	if ok, typepodkluch := connectWithKassa(fptr, *comport, *ipaddresskkt, *portkktatol, *ipaddressservrkkt); !ok {
 		//if !connectWithKassa(fptr, *comport, *ipaddresskkt, *ipaddressservrkkt) {
 		descrErr := fmt.Sprintf("ошибка сокдинения с кассовым аппаратом %v", typepodkluch)
 		logsmap[LOGERROR].Println(descrErr)
