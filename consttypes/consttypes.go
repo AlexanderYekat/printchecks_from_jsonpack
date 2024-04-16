@@ -47,7 +47,7 @@ type TCashierInfoMerc struct {
 }
 
 type TBuyerInfoMerc struct {
-	BuyerName string `json:"buyerName"`
+	BuyerName string `json:"buyerName,omitempty"`
 	BuyerINN  string `json:"buyerID,omitempty"`
 }
 

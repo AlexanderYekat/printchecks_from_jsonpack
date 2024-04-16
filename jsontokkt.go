@@ -48,7 +48,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_04_14_01"
+const Version_of_program = "2024_04_16_01"
 
 func main() {
 	var err error
@@ -797,8 +797,11 @@ func runProcessCheckMark(kassatype string, fptr *fptr10.IFptr, ipktt string, por
 				err = json.Unmarshal(resMercAnswerBytes, &MercurAnswerOfCheckMark)
 				if err == nil {
 					resJson = MercurAnswerOfCheckMark.Description
-					if MercurAnswerOfCheckMark.Result != 0 {
+					if MercurAnswerOfCheckMark.Result != 0 && !*emulation {
 						resJson = "error " + resJson
+					}
+					if MercurAnswerOfCheckMark.Result != 0 && *emulation {
+						MercurAnswerOfCheckMark.IsCompleted = true
 					}
 				}
 			}
@@ -861,7 +864,7 @@ func runProcessCheckMark(kassatype string, fptr *fptr10.IFptr, ipktt string, por
 			err = json.Unmarshal(resMercAnswerBytes, &MercurAnswerOfResultOfCheckMark)
 			if err == nil {
 				resOfChecking = MercurAnswerOfResultOfCheckMark.Description
-				if MercurAnswerOfResultOfCheckMark.Result != 0 {
+				if MercurAnswerOfResultOfCheckMark.Result != 0 && !*emulation {
 					resOfChecking = "error " + resJson
 				}
 			}
