@@ -1,5 +1,7 @@
 package consttypes
 
+import "os"
+
 type TShiftInfoMerc struct {
 	IsOpen      bool `json:"isOpen"`
 	Is24Expired bool `json:"is24Expired"`
@@ -113,7 +115,7 @@ type TMercPosition struct {
 	PaymentFormCode int          `json:"paymentFormCode"`
 	ProductTypeCode int          `json:"productTypeCode"`
 	Price           int          `json:"price"`
-	Sum             int          `json:"sum"`
+	Sum             int          `json:"sum,omitempty"`
 	Agent           *TAgentMerc  `json:"agent,omitempty"`
 }
 
@@ -124,25 +126,37 @@ type TMercCloseCheck struct {
 	Payment     TMercPayments `json:"payment"`
 }
 
+type TMercKKTInfo struct {
+	RegNum string `json:"regNum"`
+}
+
+type TMercRegistrationInfo struct {
+	Kkt       TMercKKTInfo `json:"kkt"`
+	TaxSystem []int        `json:"taxSystem"`
+}
+
 type TAnswerMercur struct {
-	Result           int               `json:"result"`
-	Description      string            `json:"description"`
-	SessionKey       string            `json:"sessionKey,omitempty"`
-	ProtocolVer      string            `json:"protocolVer,omitempty"`
-	FnNum            string            `json:"fnNum,omitempty"`
-	KktNum           string            `json:"kktNum,omitempty"`
-	Model            string            `json:"model,omitempty"`
-	ShiftInfo        *TShiftInfoMerc   `json:"shiftInfo,omitempty"`
-	CheckInfo        *TCheckInfoMerc   `json:"checkInfo,omitempty"`
-	FnInfo           *TFnInfoMerc      `json:"fnInfo,omitempty"`
-	IsCompleted      bool              `json:"isCompleted,omitempty"`
-	McCheckResultRaw int               `json:"mcCheckResultRaw,omitempty"`
-	OnlineCheck      *TOnlineCheckMerc `json:"onlineCheck,omitempty"`
-	GoodsNum         int               `json:"goodsNum,omitempty"`
-	ShiftNum         int               `json:"shiftNum,omitempty"`
-	CheckNum         int               `json:"checkNum,omitempty"`
-	FiscalDocNum     int               `json:"fiscalDocNum,omitempty"`
-	FiscalSign       string            `json:"fiscalSign,omitempty"`
+	Result           int                    `json:"result"`
+	Description      string                 `json:"description"`
+	SessionKey       string                 `json:"sessionKey,omitempty"`
+	ProtocolVer      string                 `json:"protocolVer,omitempty"`
+	FnNum            string                 `json:"fnNum,omitempty"`
+	KktNum           string                 `json:"kktNum,omitempty"`
+	Model            string                 `json:"model,omitempty"`
+	ShiftInfo        *TShiftInfoMerc        `json:"shiftInfo,omitempty"`
+	CheckInfo        *TCheckInfoMerc        `json:"checkInfo,omitempty"`
+	FnInfo           *TFnInfoMerc           `json:"fnInfo,omitempty"`
+	IsCompleted      bool                   `json:"isCompleted,omitempty"`
+	McCheckResultRaw int                    `json:"mcCheckResultRaw,omitempty"`
+	OnlineCheck      *TOnlineCheckMerc      `json:"onlineCheck,omitempty"`
+	GoodsNum         int                    `json:"goodsNum,omitempty"`
+	ShiftNum         int                    `json:"shiftNum,omitempty"`
+	CheckNum         int                    `json:"checkNum,omitempty"`
+	FiscalDocNum     int                    `json:"fiscalDocNum,omitempty"`
+	FiscalSign       string                 `json:"fiscalSign,omitempty"`
+	DriverVer        string                 `json:"driverVer,omitempty"`
+	DriverBaseVer    string                 `json:"driverBaseVer,omitempty"`
+	RegistrationInfo *TMercRegistrationInfo `json:"registrationInfo,omitempty"`
 }
 
 type TClientInfo struct {
@@ -299,3 +313,12 @@ const LOG_PREFIX = "TASKS"
 
 const FILE_NAME_PRINTED_CHECKS = "printed.txt"
 const FILE_NAME_CONNECTION = "connection.txt"
+
+func DoesFileExist(fullFileName string) (found bool, err error) {
+	found = false
+	if _, err = os.Stat(fullFileName); err == nil {
+		// path/to/whatever exists
+		found = true
+	}
+	return
+}
