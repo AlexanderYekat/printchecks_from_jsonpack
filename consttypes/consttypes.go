@@ -283,7 +283,8 @@ type TCorrectionCheck struct {
 	Total    float64       `json:"total,omitempty"`
 }
 
-type TCorrectionCheckMercHeader struct {
+type TItemInfoCheckResultObject struct {
+	ItemInfoCheckResult TItemInfoCheckResult `json:"itemInfoCheckResult"`
 }
 
 var DIROFJSONS = ".\\jsons\\works\\"

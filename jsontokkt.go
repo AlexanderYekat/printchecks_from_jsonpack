@@ -59,6 +59,7 @@ func main() {
 	var ExlusionDateDate time.Time
 	var lastNameOfKassir string
 	var fptr *fptr10.IFptr
+	var sessionkey string
 	//выводим информацию о программе
 	//читаем параметры запуска программы
 	//открываем лог файлы
@@ -199,6 +200,23 @@ func main() {
 			logsmap[consttypes.LOGINFO_WITHSTD].Printf("подключение к кассе на порт %v прошло успешно", *comport)
 		}
 		defer fptr.Close()
+	} else {
+		var err error
+		logother := new(string)
+		descrError := ""
+		sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*IpMerc, *PortMerc, *comport, "", logother)
+		if err != nil {
+			logsmap[consttypes.LOGERROR].Printf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
+			if !*emulation {
+				println("Нажмите любую клавишу...")
+				input.Scan()
+				log.Panic(descrError)
+			}
+		} else {
+			logsmap[consttypes.LOGINFO_WITHSTD].Printf("подключение к кассе меркурий на порт %v прошло успешно. Ключ сессии: %v", *comport, sessionkey)
+		}
+		logginInFile(*logother)
+		merc.Closesession(*IpMerc, *PortMerc, &sessionkey, logother)
 	}
 	//открытие для запиписи файла напечатанных чеков
 	logsmap[consttypes.LOGINFO_WITHSTD].Println("отрытие для записи таблицы напечатанных чеков")
@@ -366,19 +384,16 @@ func main() {
 				breakProcCheckOfMark(fptr)
 				clearTanlesOfMarks(fptr)
 			} else {
-				//mercyr меркурий
-				//b := getJsonMercStopProcessMarks()
-				//sendtcp.SendCommandTCPMerc(b, *IpMerc, *PortMerc)
-				//b = getJsonClearMarks()
-				//sendtcp.SendCommandTCPMerc(b, *IpMerc, *PortMerc)
+				logother := new(string)
+				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey, logother)
+				logginInFile(*logother)
 			}
 		}
 		//ищем все марки в json-задании и запускаем по каждой из них проверку
 		previusWasMarks = false
 		mistakeCheckingMark := false
 		markErroDescr := ""
-		//if *kassatype == "atol" {
-		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *pauseOfMarksMistake)
+		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake)
 		if existMarksInCheck {
 			previusWasMarks = true
 		}
@@ -394,11 +409,19 @@ func main() {
 			if *kassatype == "atol" {
 				breakProcCheckOfMark(fptr)
 				clearTanlesOfMarks(fptr)
+			} else {
+				logother := new(string)
+				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey, logother)
+				logginInFile(*logother)
 			}
 			//отключаемся от ККТ
+			logsmap[consttypes.LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
 			if *kassatype == "atol" {
-				logsmap[consttypes.LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
 				disconnectWithKKT(fptr, true)
+			} else {
+				logother := new(string)
+				merc.DissconnectMeruriy(*IpMerc, *PortMerc, sessionkey, logother)
+				logginInFile(*logother)
 			}
 			//делаем паузу
 			logsmap[consttypes.LOGINFO_WITHSTD].Printf("делаем паузу в %v секунд...", *pauseOfMarksMistake)
@@ -415,12 +438,29 @@ func main() {
 					globalMistake = true
 					break
 				}
+			} else {
+				var err error
+				logother := new(string)
+				descrError := ""
+				sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*IpMerc, *PortMerc, *comport, "", logother)
+				if err != nil {
+					logsmap[consttypes.LOGERROR].Printf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
+					if !*emulation {
+						println("Нажмите любую клавишу...")
+						input.Scan()
+						log.Panic(descrError)
+					}
+				} else {
+					logsmap[consttypes.LOGINFO_WITHSTD].Printf("подключение к кассе меркурий на порт %v прошло успешно. Ключ сессии: %v", *comport, sessionkey)
+				}
+				logginInFile(*logother)
+				merc.Closesession(*IpMerc, *PortMerc, &sessionkey, logother)
 			}
 			//запускаем проверку марки заново
 			logginInFile("снова запускаем проверку марки")
-			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *pauseOfMarksMistake)
+			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake)
 		}
-		//если были серьёхные ошибки при проверки прерываем программу
+		//если были серьёзные ошибки при проверки прерываем программу
 		if globalMistake {
 			errorDescr := fmt.Sprintf("ошибка %v", globalErrorStr)
 			logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -540,7 +580,7 @@ func dialogContinuePrintChecks() (bool, string) {
 	return res, command
 }
 
-func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, receipt consttypes.TCorrectionCheck, FullFileName string, perezapuskatproverku bool, pausetimesec int) (consttypes.TCorrectionCheck, bool, bool, string, bool, string) {
+func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, receipt consttypes.TCorrectionCheck, FullFileName string, perezapuskatproverku bool, ipktt string, port int, comport int, sessionkey string, pausetimesec int) (consttypes.TCorrectionCheck, bool, bool, string, bool, string) {
 	logginInFile("ищем марки в чеке")
 	//читаем данные по маркам
 	mistakeCheckingMark := false
@@ -568,7 +608,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 		existMarksInCheck = true
 		logstr := fmt.Sprintf("запускаем процесс проверки марки %v для чека %v", currMarkBase64, FullFileName)
 		logsmap[consttypes.LOGINFO_WITHSTD].Println(logstr)
-		imcResultCheckin, errproc := runProcessCheckMark(fptr, currMarkBase64)
+		imcResultCheckin, errproc := runProcessCheckMark(kassatype, fptr, ipktt, port, sessionkey, currMarkBase64)
 		if *emulatmistakesmarks {
 			errproc = errors.New("симуляция ошибки провекри марки")
 		}
@@ -581,27 +621,55 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 				logginInFile(fmt.Sprintf("перезапускаем проверку марки %v...", currMarkBase64))
 				logsmap[consttypes.LOGINFO_WITHSTD].Println("перезапускаем проверку марки...")
 				//прерываем предыдущую провекру марки
-				breakProcCheckOfMark(fptr)
+				if kassatype == "atol" {
+					breakProcCheckOfMark(fptr)
+				} else {
+					loginfoother := new(string)
+					merc.BreakProcCheckOfMark(ipktt, port, comport, sessionkey, loginfoother)
+					logginInFile(*loginfoother)
+				}
 				//отключаемся от ККТ
 				logsmap[consttypes.LOGINFO_WITHSTD].Println("отключаемся от ККТ")
-				disconnectWithKKT(fptr, true)
+				if kassatype == "atol" {
+					disconnectWithKKT(fptr, true)
+				} else {
+					loginfoother := new(string)
+					merc.DissconnectMeruriy(ipktt, port, sessionkey, loginfoother)
+					logginInFile(*loginfoother)
+				}
 				//делаем паузу
 				logsmap[consttypes.LOGINFO_WITHSTD].Printf("пауза в %v секунд...", pausetimesec)
 				duration := time.Second * time.Duration(pausetimesec)
 				time.Sleep(duration)
 				//подключаемся к ККТ
 				logsmap[consttypes.LOGINFO_WITHSTD].Println("подлкючаемся к ККТ")
-				_, err := connectToKKT(fptr, true)
-				if err != nil {
-					descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
-					logsmap[consttypes.LOGERROR].Println(descrError)
-					globalErrorStr = descrError
-					globalMistake = true
-					break
+				if kassatype == "atol" {
+					_, err := connectToKKT(fptr, true)
+					if err != nil {
+						descrError := fmt.Sprintf("ошибка (%v) подключения к ККТ атол", err)
+						logsmap[consttypes.LOGERROR].Println(descrError)
+						globalErrorStr = descrError
+						globalMistake = true
+						break
+					}
+				} else {
+					var err error
+					logother := new(string)
+					descrError := ""
+					sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*IpMerc, *PortMerc, comport, "", logother)
+					if err != nil {
+						descrError := fmt.Sprintf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
+						logsmap[consttypes.LOGERROR].Printf(descrError)
+						globalErrorStr = descrError
+						globalMistake = true
+						break
+					}
+					logginInFile(*logother)
+					merc.Closesession(*IpMerc, *PortMerc, &sessionkey, logother)
 				}
 				//запускаем проверку марки заново
 				logginInFile("снова запускаем проверку марки")
-				imcResultCheckin, errproc = runProcessCheckMark(fptr, currMarkBase64)
+				imcResultCheckin, errproc = runProcessCheckMark(kassatype, fptr, ipktt, port, sessionkey, currMarkBase64)
 			} //перезапуск провекри марки
 			if errproc != nil {
 				errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v для чека %v атол", errproc, currMarkBase64, FullFileName)
@@ -626,7 +694,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 		ItemInfoCheckResult.ImcEstimatedStatusCorrect = imcResultCheckin.ImcEstimatedStatusCorrect
 	}
 	return receipt, existMarksInCheck, mistakeCheckingMark, errorDescr, globalMistake, globalErrorStr
-}
+} //CheckAndRunsCheckingMarksByCheck
 
 func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string, error) {
 	var err error
@@ -671,12 +739,9 @@ func sendComandeAndGetAnswerFromKKT(fptr *fptr10.IFptr, comJson string) (string,
 	return result, nil
 }
 
-func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoCheckResult, error) {
+func runProcessCheckMark(kassatype string, fptr *fptr10.IFptr, ipktt string, port int, sessionkey string, mark string) (consttypes.TItemInfoCheckResult, error) {
 	var countAttempts int
-	type TItemInfoCheckResultObject struct {
-		ItemInfoCheckResult consttypes.TItemInfoCheckResult `json:"itemInfoCheckResult"`
-	}
-	var imcResultCheckinObj TItemInfoCheckResultObject
+	var imcResultCheckinObj consttypes.TItemInfoCheckResultObject
 	var imcResultCheckin consttypes.TItemInfoCheckResult
 	logginInFile("начало процедуры runProcessCheckMark")
 	//проверяем - открыта ли смена
@@ -692,7 +757,24 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoC
 	//	return TItemInfoCheckResult{}, errors.New(errorDescr)
 	//}
 	//посылаем запрос на проверку марки
-	resJson, err := sendCheckOfMark(fptr, mark)
+	var resJson string
+	var err error
+	if kassatype == "atol" {
+		resJson, err = sendCheckOfMark(fptr, mark)
+	} else {
+		var resMercAnswerBytes []byte
+		var answerMerc consttypes.TAnswerMercur
+		resMercAnswerBytes, err = merc.SendCheckOfMark(ipktt, port, sessionkey, mark, 0)
+		if err == nil {
+			err = json.Unmarshal(resMercAnswerBytes, &answerMerc)
+			if err == nil {
+				resJson = answerMerc.Description
+				if answerMerc.Result != 0 {
+					resJson = "error " + resJson
+				}
+			}
+		}
+	}
 	if err != nil {
 		errorDescr := fmt.Sprintf("ошибка (%v) запуска проверки марки %v", err, mark)
 		logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -705,7 +787,22 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoC
 	}
 	for countAttempts = 0; countAttempts < *countOfCheckingMarks; countAttempts++ {
 		var answerOfCheckMark consttypes.TAnsweChekcMark
-		resJson, err := getStatusOfChecking(fptr)
+		var MercurAnswerOfCheckMark consttypes.TAnswerMercur
+		if kassatype == "atol" {
+			resJson, err = getStatusOfChecking(fptr)
+		} else {
+			var resMercAnswerBytes []byte
+			resMercAnswerBytes, err = merc.GetStatusOfChecking(ipktt, port, sessionkey)
+			if err == nil {
+				err = json.Unmarshal(resMercAnswerBytes, &MercurAnswerOfCheckMark)
+				if err == nil {
+					resJson = MercurAnswerOfCheckMark.Description
+					if MercurAnswerOfCheckMark.Result != 0 {
+						resJson = "error " + resJson
+					}
+				}
+			}
+		}
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", err, mark)
 			logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -714,20 +811,26 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoC
 		if !successCommand(resJson) {
 			//делаем паузу
 			logginInFile(resJson)
-			desrAction := "пауза в 1 минуту... так сервер провекри марок не успевает."
+			desrAction := fmt.Sprintf("пауза в %v секунд... так сервер провекри марок не успевает.", *pauseOfMarksMistake)
 			logsmap[consttypes.LOGINFO_WITHSTD].Println(desrAction)
-			duration := time.Second * 60
+			duration := time.Second * time.Duration(*pauseOfMarksMistake)
 			time.Sleep(duration)
 			//if strings.Contains(resJson, "421")
 			//errorDescr := fmt.Sprintf("ошибка (%v) получения статуса проверки марки %v", resJson, mark)
 			//logsmap[consttypes.LOGERROR].Println(errorDescr)
 			//return TItemInfoCheckResult{}, errors.New(errorDescr)
 		}
-		err = json.Unmarshal([]byte(resJson), &answerOfCheckMark)
+		err = nil
+		if kassatype == "atol" {
+			err = json.Unmarshal([]byte(resJson), &answerOfCheckMark)
+		}
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) ответа проверки марки %v", err, resJson, mark)
 			logsmap[consttypes.LOGERROR].Println(errorDescr)
 			return consttypes.TItemInfoCheckResult{}, errors.New(errorDescr)
+		}
+		if kassatype != "atol" {
+			answerOfCheckMark.Ready = MercurAnswerOfCheckMark.IsCompleted
 		}
 		if answerOfCheckMark.Ready {
 			if (*emulation) && (countAttempts < *countOfCheckingMarks-20) {
@@ -747,7 +850,23 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoC
 		return consttypes.TItemInfoCheckResult{}, errors.New(errorDescr)
 	}
 	//принимаем марку
-	resOfChecking, err := acceptMark(fptr)
+	var resOfChecking string
+	var MercurAnswerOfResultOfCheckMark consttypes.TAnswerMercur
+	if kassatype == "atol" {
+		resOfChecking, err = acceptMark(fptr)
+	} else {
+		var resMercAnswerBytes []byte
+		resMercAnswerBytes, err = merc.AcceptMark(ipktt, port, sessionkey)
+		if err == nil {
+			err = json.Unmarshal(resMercAnswerBytes, &MercurAnswerOfResultOfCheckMark)
+			if err == nil {
+				resOfChecking = MercurAnswerOfResultOfCheckMark.Description
+				if MercurAnswerOfResultOfCheckMark.Result != 0 {
+					resOfChecking = "error " + resJson
+				}
+			}
+		}
+	}
 	if err != nil {
 		errorDescr := fmt.Sprintf("ошибка (%v) принятия марки %v", err, mark)
 		logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -758,17 +877,22 @@ func runProcessCheckMark(fptr *fptr10.IFptr, mark string) (consttypes.TItemInfoC
 		logsmap[consttypes.LOGERROR].Println(errorDescr)
 		return consttypes.TItemInfoCheckResult{}, errors.New(errorDescr)
 	}
-	err = json.Unmarshal([]byte(resOfChecking), &imcResultCheckinObj)
+	err = nil
+	if kassatype == "atol" {
+		err = json.Unmarshal([]byte(resOfChecking), &imcResultCheckinObj)
+	}
 	if err != nil {
 		errorDescr := fmt.Sprintf("ошибка (%v) парсинга (%v) ответа проверки марки %v", err, resOfChecking, mark)
 		logsmap[consttypes.LOGERROR].Println(errorDescr)
 		return consttypes.TItemInfoCheckResult{}, errors.New(errorDescr)
 	}
-	imcResultCheckin.EcrStandAloneFlag = imcResultCheckinObj.ItemInfoCheckResult.EcrStandAloneFlag
-	imcResultCheckin.ImcCheckFlag = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckFlag
-	imcResultCheckin.ImcCheckResult = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckResult
-	imcResultCheckin.ImcEstimatedStatusCorrect = imcResultCheckinObj.ItemInfoCheckResult.ImcEstimatedStatusCorrect
-	imcResultCheckin.ImcStatusInfo = imcResultCheckinObj.ItemInfoCheckResult.ImcStatusInfo
+	if kassatype == "atol" {
+		imcResultCheckin.EcrStandAloneFlag = imcResultCheckinObj.ItemInfoCheckResult.EcrStandAloneFlag
+		imcResultCheckin.ImcCheckFlag = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckFlag
+		imcResultCheckin.ImcCheckResult = imcResultCheckinObj.ItemInfoCheckResult.ImcCheckResult
+		imcResultCheckin.ImcEstimatedStatusCorrect = imcResultCheckinObj.ItemInfoCheckResult.ImcEstimatedStatusCorrect
+		imcResultCheckin.ImcStatusInfo = imcResultCheckinObj.ItemInfoCheckResult.ImcStatusInfo
+	}
 	logginInFile("конец процедуры runProcessCheckMark без ошибки")
 	return imcResultCheckin, nil
 } //runProcessCheckMark
