@@ -271,7 +271,9 @@ func main() {
 			var descrError string
 			var err error
 			if sessionkey != "" {
+				logsmy.LogginInFile(fmt.Sprintln("session key before", sessionkey))
 				merc.Closesession(*IpMerc, *PortMerc, &sessionkey)
+				logsmy.LogginInFile(fmt.Sprintln("session key after", sessionkey))
 			}
 			sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "")
 			if err != nil {
@@ -510,7 +512,7 @@ func main() {
 			resulOfCommand, err = sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
 		} else {
 			//mercuriy //меркурий
-			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, mercSNODefault)
+			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault)
 		}
 		//если были ошибку при печати чека, то переходим к следующему заданию
 		if err != nil {
