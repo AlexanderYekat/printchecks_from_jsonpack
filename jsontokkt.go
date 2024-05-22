@@ -35,6 +35,7 @@ var ipaddresskkt = flag.String("ipkkt", "", "ip адрес ккт")
 var portkktatol = flag.Int("portipkkt", 0, "порт ip ккт")
 var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервера ккт")
 var emulation = flag.Bool("emul", false, "эмуляция")
+var dontprintrealfortest = flag.Bool("test", false, "тест - не печатать реальный чек")
 var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
 var emulatmistakesmarks = flag.Bool("emulmistmark", false, "эмуляция ошибок марок")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
@@ -48,7 +49,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_04_16_01"
+const Version_of_program = "2024_05_22_01"
 
 func main() {
 	var err error
@@ -512,7 +513,7 @@ func main() {
 			resulOfCommand, err = sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
 		} else {
 			//mercuriy //меркурий
-			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault)
+			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault, *dontprintrealfortest)
 		}
 		//если были ошибку при печати чека, то переходим к следующему заданию
 		if err != nil {

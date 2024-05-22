@@ -68,7 +68,7 @@ type TMercOpenCheck struct {
 	Command         string              `json:"command"`
 	CheckType       int                 `json:"checkType"`
 	TaxSystem       int                 `json:"taxSystem"`
-	PrintDoc        bool                `json:"printDoc,omitempty"`
+	PrintDoc        bool                `json:"printDoc"`
 	AdditionalProps string              `json:"additionalProps"`
 	CashierInfo     TCashierInfoMerc    `json:"cashierInfo"`
 	BuyerInfo       *TBuyerInfoMerc     `json:"buyerInfo,omitempty"`
