@@ -49,7 +49,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_05_22_01"
+const Version_of_program = "2024_05_28_01"
 
 func main() {
 	var err error

@@ -1,43 +1,43 @@
 {
-    "FixedFileInfo": {
-        "FileVersion": {
-            "Major": 2024,
-            "Minor": 5,
-            "Patch": 22,
-            "Build": 1
-        },
-        "ProductVersion": {
-            "Major": 2024,
-            "Minor": 5,
-            "Patch": 22,
-            "Build": 1
-        },
-        "FileFlagsMask": "3f",
-        "FileFlags ": "00",
-        "FileOS": "000004",
-        "FileType": "01",
-        "FileSubType": "00"
-    },
-    "StringFileInfo": {
-        "Comments": "chemsaha@yandex.ru",
-        "CompanyName": "Екатеринбург",
-        "FileDescription": "пробитие на кассе чеков коррекции",
-        "FileVersion": "",
-        "InternalName": "",
-        "LegalCopyright": "",
-        "LegalTrademarks": "",
-        "OriginalFilename": "jsontokkt.exe",
-        "PrivateBuild": "",
-        "ProductName": "",
-        "ProductVersion": "v2024.05.22.01",
-        "SpecialBuild": ""
-    },
-    "VarFileInfo": {
-        "Translation": {
-            "LangID": "0419",
-            "CharsetID": "04B0"
-        }
-    },
-    "IconPath": "",
-    "ManifestPath": ""
+	"FixedFileInfo": {
+		"FileVersion": {
+			"Major": 2024,
+			"Minor": 5,
+			"Patch": 28,
+			"Build": 1
+		},
+		"ProductVersion": {
+			"Major": 2024,
+			"Minor": 5,
+			"Patch": 28,
+			"Build": 1
+		},
+		"FileFlagsMask": "3f",
+		"FileFlags ": "00",
+		"FileOS": "000004",
+		"FileType": "01",
+		"FileSubType": "00"
+	},
+	"StringFileInfo": {
+		"Comments": "chemsaha@yandex.ru",
+		"CompanyName": "Екатеринбург",
+		"FileDescription": "пробитие на кассе чеков коррекции",
+		"FileVersion": "",
+		"InternalName": "",
+		"LegalCopyright": "",
+		"LegalTrademarks": "",
+		"OriginalFilename": "jsontokkt.exe",
+		"PrivateBuild": "",
+		"ProductName": "",
+		"ProductVersion": "v2024.05.28.01",
+		"SpecialBuild": ""
+	},
+	"VarFileInfo": {
+		"Translation": {
+			"LangID": "0419",
+			"CharsetID": "04B0"
+		}
+	},
+	"IconPath": "",
+	"ManifestPath": ""
 }
