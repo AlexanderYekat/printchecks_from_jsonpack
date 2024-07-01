@@ -31,6 +31,7 @@ var LogsDebugs = flag.Int("debug", 0, "уровень логирования в�
 var comport = flag.Int("com", 0, "ком порт кассы")
 var emailforcheck = flag.String("email", "", "email клиента чека")
 var PrintCheckOnKKT = flag.String("print", "", "печтать или не печатать чек на ККТ: true - печатать, false - не печетать")
+var CassirName = flag.String("cassir", "", "имя кассира")
 var ipaddresskkt = flag.String("ipkkt", "", "ip адрес ккт")
 var portkktatol = flag.Int("portipkkt", 0, "порт ip ккт")
 var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервера ккт")
@@ -49,7 +50,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_05_28_01"
+const Version_of_program = "2024_07_01_01"
 
 func main() {
 	var err error
@@ -495,6 +496,10 @@ func main() {
 				wasChangeParametersOfCheck = true
 			}
 		}
+		if *CassirName != "" {
+			receipt.Operator.Name = *CassirName
+			wasChangeParametersOfCheck = true
+		}
 		if (existMarksInCheck) || (wasChangeParametersOfCheck) {
 			jsonCorrWithMarkBytes, err := json.MarshalIndent(receipt, "", "\t")
 			if err != nil {
@@ -506,7 +511,7 @@ func main() {
 			jsonCorrection = string(jsonCorrWithMarkBytes)
 		}
 		//печатаем чек
-		logstr = fmt.Sprintf("послыем команду печати чека кассу json файл %v", jsonCorrection)
+		logstr = fmt.Sprintf("посылаем команду печати чека кассу json файл %v", jsonCorrection)
 		logsmy.LogginInFile(logstr)
 		resulOfCommand := ""
 		if *kassatype == "atol" {
