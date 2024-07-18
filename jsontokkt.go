@@ -43,6 +43,8 @@ var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток �
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
 var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошибочных чеков, после которого останавливать программу")
 var pauseOfMarksMistake = flag.Int("pause_mist", 10, "пауза между проблемами с марками")
+var conversChekcCorrectionsType = flag.Bool("converse", false, "для всех чеков бить чеки коррекции сторнирующий")
+var changeCashOnBeznal = flag.Bool("cashtobeznal", false, "поменять нал на безнал")
 
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
@@ -50,7 +52,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_07_01_01"
+const Version_of_program = "2024_07_18_02"
 
 func main() {
 	var err error
@@ -499,6 +501,34 @@ func main() {
 		if *CassirName != "" {
 			receipt.Operator.Name = *CassirName
 			wasChangeParametersOfCheck = true
+		}
+		//пробиваем чек коррекции возврата на неправильный чек
+		if *conversChekcCorrectionsType {
+			logsmy.LogginInFile("конвертируем тим чека коррекции")
+			if receipt.Type == "sellCorrection" {
+				logsmy.LogginInFile("меняем тип чека коррекции с продажи на возврат")
+				receipt.Type = "sellReturnCorrection"
+			} else if receipt.Type == "sellReturnCorrection" {
+				logsmy.LogginInFile("меняем тип чека коррекции с возврата на продажу")
+				receipt.Type = "sellCorrection"
+			} else if receipt.Type == "buyCorrection" {
+				logsmy.LogginInFile("меняем тип чека коррекции с покупки на возрат покупки")
+				receipt.Type = "buyReturnCorrection"
+			} else if receipt.Type == "buyReturnCorrection" {
+				logsmy.LogginInFile("меняем тип чека коррекции с возрата покупки на покупку")
+				receipt.Type = "buyCorrection"
+			}
+			wasChangeParametersOfCheck = true
+		}
+		//меняем тип оплаты с наличной на безнал
+		if *changeCashOnBeznal {
+			for ind := range receipt.Payments {
+				if receipt.Payments[ind].Type == "cash" {
+					logsmy.LogginInFile(fmt.Sprintf("меняем тип оплаты с налички на безнал на сумму %v", receipt.Payments[ind].Sum))
+					receipt.Payments[ind].Type = "electronically"
+					wasChangeParametersOfCheck = true
+				}
+			}
 		}
 		if (existMarksInCheck) || (wasChangeParametersOfCheck) {
 			jsonCorrWithMarkBytes, err := json.MarshalIndent(receipt, "", "\t")
