@@ -23,6 +23,8 @@ import (
 var kassatype = flag.String("kassatype", "atol", "касса (atol - атол, merc - меркурий)")
 var IpMerc = flag.String("ipMerc", "localhost", "ip адрес сервера Меркурия")
 var PortMerc = flag.Int("PortMerc", 50009, "порт сервера Меркурия")
+var userint = flag.Int("UserMerc", 0, "номер пользователя в кассе меркрий")
+var passwuser = flag.String("PaswUserMerc", "", "пароль пользователя меркурий")
 var dirOfjsons = flag.String("dirjsons", ".\\jsons\\works\\", "директория json файлов по умолчанию ./jsons/")
 var clearLogsProgramm = flag.Bool("clearlogs", true, "очистить логи программы")
 var countChecksForPause = flag.Int("countforpause", 0, "число чеков, после которых программа делает небольшую паузу")
@@ -38,6 +40,7 @@ var ipaddressservrkkt = flag.String("ipservkkt", "", "ip адрес сервер
 var emulation = flag.Bool("emul", false, "эмуляция")
 var dontprintrealfortest = flag.Bool("test", false, "тест - не печатать реальный чек")
 var emulatmistakes = flag.Bool("emulmist", false, "эмуляция ошибок")
+var emulatmistakesOpenCheck = flag.Bool("emulmistopencheck", false, "эмуляция ошибок открытия чека")
 var emulatmistakesmarks = flag.Bool("emulmistmark", false, "эмуляция ошибок марок")
 var countOfCheckingMarks = flag.Int("attempts", 20, "число попыток провекри марки")
 var clearTableOfMarks = flag.Bool("clearmarks", true, "очищать таблицу марок перед запуском на ККТ нового чека")
@@ -52,7 +55,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_07_18_02"
+const Version_of_program = "2024_07_30_02"
 
 func main() {
 	var err error
@@ -191,7 +194,7 @@ func main() {
 	} else {
 		var err error
 		descrError := ""
-		sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "")
+		sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "", *userint, *passwuser)
 		if err != nil {
 			logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
 			if !*emulation {
@@ -279,7 +282,7 @@ func main() {
 				merc.Closesession(*IpMerc, *PortMerc, &sessionkey)
 				logsmy.LogginInFile(fmt.Sprintln("session key after", sessionkey))
 			}
-			sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "")
+			sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "", *userint, *passwuser)
 			if err != nil {
 				logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
 				if !*emulation {
@@ -400,14 +403,14 @@ func main() {
 				breakProcCheckOfMark(fptr)
 				clearTanlesOfMarks(fptr)
 			} else {
-				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey)
+				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey, *userint, *passwuser)
 			}
 		}
 		//ищем все марки в json-задании и запускаем по каждой из них проверку
 		previusWasMarks = false
 		mistakeCheckingMark := false
 		markErroDescr := ""
-		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake)
+		receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake, *userint, *passwuser)
 		if existMarksInCheck {
 			previusWasMarks = true
 		}
@@ -424,7 +427,7 @@ func main() {
 				breakProcCheckOfMark(fptr)
 				clearTanlesOfMarks(fptr)
 			} else {
-				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey)
+				merc.BreakAndClearProccessOfMarks(*IpMerc, *PortMerc, *comport, sessionkey, *userint, *passwuser)
 			}
 			//отключаемся от ККТ
 			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("отлючаемся от ККТ")
@@ -451,7 +454,7 @@ func main() {
 			} else {
 				var err error
 				descrError := ""
-				sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "")
+				sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, *comport, "", *userint, *passwuser)
 				if err != nil {
 					logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
 					if !*emulation {
@@ -466,7 +469,7 @@ func main() {
 			}
 			//запускаем проверку марки заново
 			logsmy.LogginInFile("снова запускаем проверку марки")
-			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake)
+			receipt, existMarksInCheck, mistakeCheckingMark, markErroDescr, globalMistake, globalErrorStr = CheckAndRunsCheckingMarksByCheck(fptr, *kassatype, receipt, currFullFileName, true, *IpMerc, *PortMerc, *comport, sessionkey, *pauseOfMarksMistake, *userint, *passwuser)
 		}
 		//если были серьёзные ошибки при проверки прерываем программу
 		if globalMistake {
@@ -548,7 +551,7 @@ func main() {
 			resulOfCommand, err = sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
 		} else {
 			//mercuriy //меркурий
-			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault, *dontprintrealfortest)
+			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault, *dontprintrealfortest, *userint, *passwuser, *emulatmistakesOpenCheck)
 		}
 		//если были ошибку при печати чека, то переходим к следующему заданию
 		if err != nil {
@@ -622,7 +625,7 @@ func dialogContinuePrintChecks() (bool, string) {
 	return res, command
 }
 
-func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, receipt consttypes.TCorrectionCheck, FullFileName string, perezapuskatproverku bool, ipktt string, port int, comport int, sessionkey string, pausetimesec int) (consttypes.TCorrectionCheck, bool, bool, string, bool, string) {
+func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, receipt consttypes.TCorrectionCheck, FullFileName string, perezapuskatproverku bool, ipktt string, port int, comport int, sessionkey string, pausetimesec int, userint int, passwuser string) (consttypes.TCorrectionCheck, bool, bool, string, bool, string) {
 	logsmy.LogginInFile("ищем марки в чеке")
 	//читаем данные по маркам
 	mistakeCheckingMark := false
@@ -666,7 +669,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 				if kassatype == "atol" {
 					breakProcCheckOfMark(fptr)
 				} else {
-					merc.BreakProcCheckOfMark(ipktt, port, comport, sessionkey)
+					merc.BreakProcCheckOfMark(ipktt, port, comport, sessionkey, userint, passwuser)
 				}
 				//отключаемся от ККТ
 				logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("отключаемся от ККТ")
@@ -693,7 +696,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 				} else {
 					var err error
 					descrError := ""
-					sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, comport, "")
+					sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, comport, "", userint, passwuser)
 					if err != nil {
 						descrError := fmt.Sprintf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
 						logsmy.Logsmap[consttypes.LOGERROR].Printf(descrError)
