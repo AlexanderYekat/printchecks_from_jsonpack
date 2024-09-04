@@ -48,6 +48,7 @@ var countOfMistakesCheckForStop = flag.Int("stop_mist", 3, "число ошиб�
 var pauseOfMarksMistake = flag.Int("pause_mist", 10, "пауза между проблемами с марками")
 var conversChekcCorrectionsType = flag.Bool("converse", false, "для всех чеков бить чеки коррекции сторнирующий")
 var changeCashOnBeznal = flag.Bool("cashtobeznal", false, "поменять нал на безнал")
+var changeOSN = flag.String("changeOSN", "", "поменять ОСН на osn - общая, usnIncome - усн доход, usnIncomeOutcome - усн доход минус расход, esn - селькоз, patent - патент")
 
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
@@ -55,7 +56,7 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_07_30_02"
+const Version_of_program = "2024_08_16_01"
 
 func main() {
 	var err error
@@ -521,6 +522,12 @@ func main() {
 				logsmy.LogginInFile("меняем тип чека коррекции с возрата покупки на покупку")
 				receipt.Type = "buyCorrection"
 			}
+			wasChangeParametersOfCheck = true
+		}
+		//меняем тип осн
+		if *changeOSN != "" {
+			//"поменять ОСН на ob - общая, usnd - усн доход, usndminr - усн доход минус расход, esn - сельскохозяйственный, patent - патент")
+			receipt.TaxationType = *changeOSN
 			wasChangeParametersOfCheck = true
 		}
 		//меняем тип оплаты с наличной на безнал
