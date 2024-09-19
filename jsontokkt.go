@@ -54,9 +54,11 @@ var countPrintChecks = flag.Int("countchecks", 0, "число успешно р�
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
 var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
 
+var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
+
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_08_16_01"
+const Version_of_program = "2024_09_04_01"
 
 func main() {
 	var err error
@@ -302,7 +304,7 @@ func main() {
 			descrError := "превышено количество ошибок чеков, остановка работы программы"
 			logsmy.LogginInFile(descrError)
 			resDial := false
-			resDial, command = dialogContinuePrintChecks()
+			resDial, command = dialogContinuePrintChecks(*dialogTimeout)
 			if !resDial && (command != "off/on") {
 				descrError := "работы программы прервана пользователем"
 				logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
@@ -609,26 +611,43 @@ func main() {
 			merc.Closesession(*IpMerc, *PortMerc, &sessionkey)
 		}
 	}
-	//выводим информацию об количестве напечтатнных чеков
-	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("распечатно %v из %v чеков", countPrintedChecks, countOfFiles)
+	//выводим информацию об количестве напечатанных чеков
+	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("распечатано %v из %v чеков", countPrintedChecks, countOfFiles)
 	println("Нажмите любую клавишу...")
 	input.Scan()
 }
 
-func dialogContinuePrintChecks() (bool, string) {
-	res := true
+func dialogContinuePrintChecks(timeout int) (bool, string) {
+	res := false
 	command := ""
 	input := bufio.NewScanner(os.Stdin)
-	println("Продолжить (да - продолжить печать чеков, нет (по умолчанию) - завершить программу, \"off/on\" - переподключиться к кассе):")
-	input.Scan()
-	if input.Text() == "off/on" {
-		command = "off/on"
+
+	// Создаем канал для получения результата
+	ch := make(chan struct{})
+
+	// Запускаем горутину для ввода пользователя
+	go func() {
+		println("Продолжить (да - продолжить печать чеков, нет (по умолчанию) - завершить программу, \"off/on\" - переподключиться к кассе):")
+		input.Scan()
+		if input.Text() == "off/on" {
+			command = "off/on"
+		} else if input.Text() != "" {
+			res, _ = getBoolFromString(input.Text(), res)
+		}
+		ch <- struct{}{}
+	}()
+
+	// Ожидаем ответ пользователя или истечение времени
+	select {
+	case <-ch:
+		// Пользователь ввел ответ
+	case <-time.After(time.Duration(timeout) * time.Second):
+		// Время истекло
+		println("Время ожидания ответа истекло. Продолжаем выполнение.")
+		res = true
+		command = ""
 	}
-	if input.Text() == "" {
-		res = false
-	} else {
-		res, _ = getBoolFromString(input.Text(), res)
-	}
+
 	return res, command
 }
 

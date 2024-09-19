@@ -1,0 +1,8 @@
+fl.bat
+.idea/
+jsons/
+jsontokkt.exe
+logs/
+run*
+!run_emul.bat
+resource.syso
