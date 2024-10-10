@@ -49,6 +49,7 @@ var pauseOfMarksMistake = flag.Int("pause_mist", 10, "пауза между пр
 var conversChekcCorrectionsType = flag.Bool("converse", false, "для всех чеков бить чеки коррекции сторнирующий")
 var changeCashOnBeznal = flag.Bool("cashtobeznal", false, "поменять нал на безнал")
 var changeOSN = flag.String("changeOSN", "", "поменять ОСН на osn - общая, usnIncome - усн доход, usnIncomeOutcome - усн доход минус расход, esn - селькоз, patent - патент")
+var changeTotalSum = flag.Bool("changetotal", true, "сумма оплат может отилчаться от суммы чека, если true - то сумма оплат может быть не равна сумме чека (отличаться на копейки)")
 
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
@@ -492,6 +493,14 @@ func main() {
 		}
 		//пересобираем json-задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
 		wasChangeParametersOfCheck := false
+		if *changeTotalSum {
+			summOfPayments := 0.0
+			for ind := range receipt.Payments {
+				summOfPayments += receipt.Payments[ind].Sum
+			}
+			receipt.Total = summOfPayments
+			wasChangeParametersOfCheck = true
+		}
 		if *emailforcheck != "" {
 			if receipt.ClientInfo.EmailOrPhone != *emailforcheck {
 				receipt.ClientInfo.EmailOrPhone = *emailforcheck

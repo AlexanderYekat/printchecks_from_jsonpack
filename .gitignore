@@ -6,3 +6,5 @@ logs/
 run*
 !run_emul.bat
 resource.syso
+2/
+infologs.txt
