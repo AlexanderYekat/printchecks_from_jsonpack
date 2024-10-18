@@ -489,8 +489,11 @@ func convertAtolToMercHeader(checkatol consttypes.TCorrectionCheck, snoDefault i
 		}
 	}
 	if checheaderkmerc.AdditionalProps == "" {
-		err := fmt.Errorf("не задан ФП чека основания для чека коррекции")
-		return checheaderkmerc, err
+		//может быть не задан
+		logstr := fmt.Sprintf("не задан ФП чека основания для чека коррекции %v", checkatol.CorrectionBaseNumber)
+		logsmy.LogginInFile(logstr)
+		//err := fmt.Errorf("не задан ФП чека основания для чека коррекции")
+		//return checheaderkmerc, err
 	}
 	checheaderkmerc.CashierInfo.CashierName = checkatol.Operator.Name
 	checheaderkmerc.CashierInfo.CashierINN = checkatol.Operator.Vatin

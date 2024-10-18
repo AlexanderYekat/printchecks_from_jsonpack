@@ -288,7 +288,7 @@ type TCorrectionCheck struct {
 	TaxationType         string       `json:"taxationType,omitempty"`
 	ClientInfo           *TClientInfo `json:"clientInfo"`
 	CorrectionType       string       `json:"correctionType"` //
-	CorrectionBaseDate   string       `json:"correctionBaseDate"`
+	CorrectionBaseDate   string       `json:"correctionBaseDate,omitempty"`
 	CorrectionBaseNumber string       `json:"correctionBaseNumber"`
 	Operator             TOperator    `json:"operator"`
 	//Items                []TPosition `json:"items"`

@@ -59,7 +59,7 @@ var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секун
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_09_04_01"
+const Version_of_program = "2024_10_10_01"
 
 func main() {
 	var err error
@@ -373,6 +373,8 @@ func main() {
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга даты %v для чека %v", err, receipt.CorrectionBaseDate, currFullFileName)
 			logsmy.Logsmap[consttypes.LOGERROR].Println(errorDescr)
+			currDateOfCheck = time.Now()
+			//fmt.Println("ошибка парсинга даты, устанавливаем текущую дату")
 		}
 		if *ExlusionDate != "" {
 			if ExlusionDateDate == currDateOfCheck {
