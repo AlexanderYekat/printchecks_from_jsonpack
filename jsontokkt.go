@@ -59,7 +59,7 @@ var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секун
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_10_18_01"
+const Version_of_program = "2024_10_25_01"
 
 func main() {
 	var err error
@@ -368,8 +368,16 @@ func main() {
 			continue
 		}
 		lastNameOfKassir = receipt.Operator.Name
+		wasChangeParametersOfCheck := false
 		//проеверяем услвоия выхода из цикла по дате чека
 		currDateOfCheck, err := time.Parse("2006.01.02", receipt.CorrectionBaseDate) //yyyy.mm.dd
+		if err != nil {
+			currDateOfCheck, err = time.Parse("02.01.2006", receipt.CorrectionBaseDate) //dd.mm.yyyy
+			if err == nil {
+				receipt.CorrectionBaseDate = currDateOfCheck.Format("2006.01.02")
+				wasChangeParametersOfCheck = true
+			}
+		}
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) парсинга даты %v для чека %v", err, receipt.CorrectionBaseDate, currFullFileName)
 			logsmy.Logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -494,7 +502,6 @@ func main() {
 			continue
 		}
 		//пересобираем json-задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
-		wasChangeParametersOfCheck := false
 		if *changeTotalSum {
 			summOfPayments := 0.0
 			for ind := range receipt.Payments {
