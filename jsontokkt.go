@@ -59,7 +59,7 @@ var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секун
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_10_10_01"
+const Version_of_program = "2024_10_18_01"
 
 func main() {
 	var err error
