@@ -50,16 +50,19 @@ var conversChekcCorrectionsType = flag.Bool("converse", false, "для всех 
 var changeCashOnBeznal = flag.Bool("cashtobeznal", false, "поменять нал на безнал")
 var changeOSN = flag.String("changeOSN", "", "поменять ОСН на osn - общая, usnIncome - усн доход, usnIncomeOutcome - усн доход минус расход, esn - селькоз, patent - патент")
 var changeTotalSum = flag.Bool("changetotal", true, "сумма оплат может отилчаться от суммы чека, если true - то сумма оплат может быть не равна сумме чека (отличаться на копейки)")
+var notCorrectionCheck = flag.Bool("notcorrection", false, "не делать чеки коррекции сторнирующие")
 
 var countPrintChecks = flag.Int("countchecks", 0, "число успешно распечатнных чеков, после которого остановить программу")
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
 var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
+var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с наличным расчетом")
+var LessThan = flag.Int("lessthan", 0, "пропускать чеки с суммой меньшей чем указанная")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_10_25_01"
+const Version_of_program = "2024_12_21_01"
 
 func main() {
 	var err error
@@ -529,19 +532,27 @@ func main() {
 		//пробиваем чек коррекции возврата на неправильный чек
 		if *conversChekcCorrectionsType {
 			logsmy.LogginInFile("конвертируем тим чека коррекции")
-			if receipt.Type == "sellCorrection" {
+			if receipt.Type == "sell" || receipt.Type == "sellCorrection" {
 				logsmy.LogginInFile("меняем тип чека коррекции с продажи на возврат")
 				receipt.Type = "sellReturnCorrection"
-			} else if receipt.Type == "sellReturnCorrection" {
+			} else if receipt.Type == "sellReturn" || receipt.Type == "sellReturnCorrection" {
 				logsmy.LogginInFile("меняем тип чека коррекции с возврата на продажу")
 				receipt.Type = "sellCorrection"
-			} else if receipt.Type == "buyCorrection" {
+			} else if receipt.Type == "buy" || receipt.Type == "buyCorrection" {
 				logsmy.LogginInFile("меняем тип чека коррекции с покупки на возрат покупки")
 				receipt.Type = "buyReturnCorrection"
-			} else if receipt.Type == "buyReturnCorrection" {
+			} else if receipt.Type == "buyReturn" || receipt.Type == "buyReturnCorrection" {
 				logsmy.LogginInFile("меняем тип чека коррекции с возрата покупки на покупку")
 				receipt.Type = "buyCorrection"
 			}
+			wasChangeParametersOfCheck = true
+		}
+		if *notCorrectionCheck {
+			logsmy.LogginInFile("печтаем обычные чеки, не чеки коррекции")
+			receipt.Type = strings.Replace(receipt.Type, "Correction", "", 1)
+			receipt.CorrectionBaseDate = ""
+			receipt.CorrectionBaseNumber = ""
+			receipt.CorrectionType = ""
 			wasChangeParametersOfCheck = true
 		}
 		//меняем тип осн
@@ -550,8 +561,8 @@ func main() {
 			receipt.TaxationType = *changeOSN
 			wasChangeParametersOfCheck = true
 		}
-		//меняем тип оплаты с наличной на безнал
 		if *changeCashOnBeznal {
+			//меняем тип оплаты с наличной на безнал
 			for ind := range receipt.Payments {
 				if receipt.Payments[ind].Type == "cash" {
 					logsmy.LogginInFile(fmt.Sprintf("меняем тип оплаты с налички на безнал на сумму %v", receipt.Payments[ind].Sum))
