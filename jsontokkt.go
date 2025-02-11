@@ -56,13 +56,13 @@ var countPrintChecks = flag.Int("countchecks", 0, "число успешно р�
 var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, после которого программа делает паузу")
 var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
 var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с наличным расчетом")
-var LessThan = flag.Int("lessthan", 0, "пропускать чеки с суммой меньшей чем указанная")
+var CashMoreThan = flag.Int("cashmorethan", 0, "пропускать нал чеки с суммой большей чем указанная")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_12_21_01"
+const Version_of_program = "2024_12_30_01"
 
 func main() {
 	var err error
@@ -514,6 +514,11 @@ func main() {
 			wasChangeParametersOfCheck = true
 		}
 		if *emailforcheck != "" {
+			// Проверяем, создан ли ClientInfo
+			if receipt.ClientInfo == nil {
+				receipt.ClientInfo = &consttypes.TClientInfo{}
+				wasChangeParametersOfCheck = true
+			}
 			if receipt.ClientInfo.EmailOrPhone != *emailforcheck {
 				receipt.ClientInfo.EmailOrPhone = *emailforcheck
 				wasChangeParametersOfCheck = true

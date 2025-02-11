@@ -58,13 +58,20 @@ func PrintCheck(emulation bool, ipktt string, port int, comport int, checkatol c
 		if err != nil {
 			descrError := "ошибка открытия сессии к ккт меркурий"
 			err = errors.Join(err, errors.New(descrError))
-			return descrError, err
+			if !emulation {
+				return descrError, err
+			} else {
+				testnomsessii = testnomsessii + 1
+				resMerc.SessionKey = "эмуляция" + strconv.Itoa(testnomsessii)
+			}
 		}
 		err = json.Unmarshal(answer, &resMerc)
 		if err != nil {
 			descrError := "ошибка при разобре ответа при отрытии сессии покдлючения к ККТ меркурий"
 			err = errors.Join(err, errors.New(descrError))
-			return descrError, err
+			if !emulation {
+				return descrError, err
+			}
 		}
 		if resMerc.Result != 0 || resMerc.SessionKey == "" {
 			descrError := "ошибка при подключении к ккт меркурий"
@@ -72,9 +79,6 @@ func PrintCheck(emulation bool, ipktt string, port int, comport int, checkatol c
 			err = errors.Join(err, errors.New(descrError))
 			if !emulation {
 				return descrError, err
-			} else {
-				testnomsessii = testnomsessii + 1
-				resMerc.SessionKey = "эмуляция" + strconv.Itoa(testnomsessii)
 			}
 		}
 		sessionkey := resMerc.SessionKey
@@ -86,25 +90,33 @@ func PrintCheck(emulation bool, ipktt string, port int, comport int, checkatol c
 	if err != nil {
 		descrError := "ошибка конвертации шапки чека атол в шапку чека меркурия"
 		err = errors.Join(err, errors.New(descrError))
-		return descrError, err
+		if !emulation {
+			return descrError, err
+		}
 	}
 	headercheckmerc, err := json.Marshal(checheaderkmerc)
 	if err != nil {
 		descrError := fmt.Sprintf("ошибка формирования шапки чека для кассы меркурий из структуры (%v)", checheaderkmerc)
 		err = errors.Join(err, errors.New(descrError))
-		return descrError, err
+		if !emulation {
+			return descrError, err
+		}
 	}
 	answer, err = opencheck(ipktt, port, headercheckmerc)
 	if err != nil {
 		descrError := "ошибка открытия чека для кассы меркурий"
 		err = errors.Join(err, errors.New(descrError))
-		return descrError, err
+		if !emulation {
+			return descrError, err
+		}
 	}
 	err = json.Unmarshal(answer, &resMerc)
 	if err != nil {
 		descrError := "ошибка разбора ответа при открытии чека для кассы меркурий"
 		err = errors.Join(err, errors.New(descrError))
-		return descrError, err
+		if !emulation {
+			return descrError, err
+		}
 	}
 	if resMerc.Result != 0 { //если не получилось открыть чек, отменяем его и пробуем отрыть заново
 		descrError := fmt.Sprintf("ошибка (%v) открытия чека для кассы меркурий (попытка 1)", resMerc.Description)
@@ -167,7 +179,7 @@ func PrintCheck(emulation bool, ipktt string, port int, comport int, checkatol c
 		}
 		answer, err = addpos(ipktt, port, mercPosJsonBytes)
 		if err != nil {
-			descrError := fmt.Sprintf("ошибка добавления позиции %v в чек для кассы меркурий", mercPosJsonBytes)
+			descrError := fmt.Sprintf("ошибка добавления позиции %v в чек для кассы меркурий", string(mercPosJsonBytes))
 			err = errors.Join(err, errors.New(descrError))
 			if !emulation {
 				return descrError, err
@@ -180,7 +192,7 @@ func PrintCheck(emulation bool, ipktt string, port int, comport int, checkatol c
 			return descrError, err
 		}
 		if resMerc.Result != 0 {
-			descrError := fmt.Sprintf("ошибка добавления позиции %v в чек для кассы меркурий", mercPosJsonBytes)
+			descrError := fmt.Sprintf("ошибка добавления позиции %v в чек для кассы меркурий", string(mercPosJsonBytes))
 			err = fmt.Errorf(resMerc.Description)
 			err = errors.Join(err, errors.New(descrError))
 			if !emulation {
