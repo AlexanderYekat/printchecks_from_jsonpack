@@ -22,3 +22,4 @@ programma2.zip
 *.bat
 ---/
 clientrabbit.exe
+!build.bat
