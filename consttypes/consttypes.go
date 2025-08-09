@@ -287,9 +287,9 @@ type TCorrectionCheck struct {
 	Electronically       bool         `json:"electronically"`
 	TaxationType         string       `json:"taxationType,omitempty"`
 	ClientInfo           *TClientInfo `json:"clientInfo"`
-	CorrectionType       string       `json:"correctionType"` //
+	CorrectionType       string       `json:"correctionType,omitempty"` //
 	CorrectionBaseDate   string       `json:"correctionBaseDate,omitempty"`
-	CorrectionBaseNumber string       `json:"correctionBaseNumber"`
+	CorrectionBaseNumber string       `json:"correctionBaseNumber,omitempty"`
 	Operator             TOperator    `json:"operator"`
 	//Items                []TPosition `json:"items"`
 	Items    []interface{} `json:"items"` //либо TTag1192_91, либо TPosition

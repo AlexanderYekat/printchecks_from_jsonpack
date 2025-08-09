@@ -1,15 +1,15 @@
 {
 	"FixedFileInfo": {
 		"FileVersion": {
-			"Major": 2024,
-			"Minor": 12,
-			"Patch": 30,
+			"Major": 2025,
+			"Minor": 5,
+			"Patch": 14,
 			"Build": 1
 		},
 		"ProductVersion": {
-			"Major": 2024,
-			"Minor": 12,
-			"Patch": 30,
+			"Major": 2025,
+			"Minor": 5,
+			"Patch": 14,
 			"Build": 1
 		},
 		"FileFlagsMask": "3f",
@@ -29,7 +29,7 @@
 		"OriginalFilename": "jsontokkt.exe",
 		"PrivateBuild": "",
 		"ProductName": "",
-		"ProductVersion": "v2024.12.30.01",
+		"ProductVersion": "v2025.05.14.01",
 		"SpecialBuild": ""
 	},
 	"VarFileInfo": {
@@ -38,6 +38,6 @@
 			"CharsetID": "04B0"
 		}
 	},
-	"IconPath": "",
+	"IconPath": "resource/icon.ico",
 	"ManifestPath": ""
 }

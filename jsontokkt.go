@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ var pauseOfMarksMistake = flag.Int("pause_mist", 10, "пауза между пр
 var conversChekcCorrectionsType = flag.Bool("converse", false, "для всех чеков бить чеки коррекции сторнирующий")
 var changeCashOnBeznal = flag.Bool("cashtobeznal", false, "поменять нал на безнал")
 var changeOSN = flag.String("changeOSN", "", "поменять ОСН на osn - общая, usnIncome - усн доход, usnIncomeOutcome - усн доход минус расход, esn - селькоз, patent - патент")
+var changeNDSOn = flag.Int("changeNDSOn", -1, "поменять ставку НДС: 0 - 0%, 5 - 5% и т.д.; -2 - поменять на БЕЗ НДС, -1 - не менять ставку НДС")
 var changeTotalSum = flag.Bool("changetotal", true, "сумма оплат может отилчаться от суммы чека, если true - то сумма оплат может быть не равна сумме чека (отличаться на копейки)")
 var notCorrectionCheck = flag.Bool("notcorrection", false, "не делать чеки коррекции сторнирующие")
 
@@ -57,12 +59,13 @@ var pauseAfterDay = flag.Int("pauseAfterDay", 0, "число дней, посл�
 var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в секундах после звершение какого-то количества дней напечатнных чеков")
 var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с наличным расчетом")
 var CashMoreThan = flag.Int("cashmorethan", 0, "пропускать нал чеки с суммой большей чем указанная")
+var checkCorrectonField = flag.Bool("checkcorrectionfield", false, "проверять поле коррекции чека")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2024_12_30_01"
+const Version_of_program = "2025_05_14_01"
 
 func main() {
 	var err error
@@ -353,6 +356,7 @@ func main() {
 		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
 		logsmy.LogginInFile(logstr)
 		jsonCorrection, err := readJsonFromFile(currFullFileName)
+		//fmt.Println(jsonCorrection)
 		if err != nil {
 			errorDescr := fmt.Sprintf("ошибка (%v) чтения json задания чека %v атол", err, currFullFileName)
 			logsmy.Logsmap[consttypes.LOGERROR].Println(errorDescr)
@@ -373,12 +377,16 @@ func main() {
 		lastNameOfKassir = receipt.Operator.Name
 		wasChangeParametersOfCheck := false
 		//проеверяем услвоия выхода из цикла по дате чека
-		currDateOfCheck, err := time.Parse("2006.01.02", receipt.CorrectionBaseDate) //yyyy.mm.dd
-		if err != nil {
-			currDateOfCheck, err = time.Parse("02.01.2006", receipt.CorrectionBaseDate) //dd.mm.yyyy
-			if err == nil {
-				receipt.CorrectionBaseDate = currDateOfCheck.Format("2006.01.02")
-				wasChangeParametersOfCheck = true
+		err = nil
+		currDateOfCheck := time.Now()
+		if receipt.CorrectionBaseDate != "" {
+			currDateOfCheck, err = time.Parse("2006.01.02", receipt.CorrectionBaseDate) //yyyy.mm.dd
+			if err != nil {
+				currDateOfCheck, err = time.Parse("02.01.2006", receipt.CorrectionBaseDate) //dd.mm.yyyy
+				if err == nil {
+					receipt.CorrectionBaseDate = currDateOfCheck.Format("2006.01.02")
+					wasChangeParametersOfCheck = true
+				}
 			}
 		}
 		if err != nil {
@@ -552,6 +560,22 @@ func main() {
 			}
 			wasChangeParametersOfCheck = true
 		}
+		if *checkCorrectonField && !*notCorrectionCheck {
+			logsmy.LogginInFile("проверяем поле коррекции чека")
+			//logsmy.LogginInFile(fmt.Sprintf("тип чека %v", receipt.Type))
+			if receipt.Type != "sellCorrection" && receipt.Type != "buyCorrection" {
+				logsmy.LogginInFile("тип чека не коррекция")
+				if receipt.Type == "sell" {
+					logsmy.LogginInFile("меняем тип чека с продажи на коррекцию продажи")
+					receipt.Type = "sellCorrection"
+				} else if receipt.Type == "buy" {
+					logsmy.LogginInFile("меняем тип чека с покупки на коррекцию покупки")
+					receipt.Type = "buyCorrection"
+				}
+				//logsmy.LogginInFile("поле коррекции чека не пустое")
+			}
+			wasChangeParametersOfCheck = true
+		}
 		if *notCorrectionCheck {
 			logsmy.LogginInFile("печтаем обычные чеки, не чеки коррекции")
 			receipt.Type = strings.Replace(receipt.Type, "Correction", "", 1)
@@ -576,6 +600,30 @@ func main() {
 				}
 			}
 		}
+
+		if *changeNDSOn != -1 {
+			//меняем ставку НДС
+			logsmy.LogginInFile(fmt.Sprintf("меняем ставку НДС на %v", *changeNDSOn))
+			for _, v := range receipt.Items {
+				typeItem := v.(map[string]interface{})["type"]
+				if typeItem != "position" {
+					continue
+				}
+				taxNDSItem := v.(map[string]interface{})["tax"]
+				taxNDSType := taxNDSItem.(map[string]interface{})["type"]
+				newTaxNDSType := taxNDSType
+				if *changeNDSOn >= 0 {
+					newTaxNDSType = "vat" + strconv.Itoa(*changeNDSOn)
+				} else {
+					newTaxNDSType = "none"
+				}
+				if taxNDSType != newTaxNDSType {
+					taxNDSItem.(map[string]interface{})["type"] = newTaxNDSType
+					wasChangeParametersOfCheck = true
+				}
+			}
+		}
+
 		if (existMarksInCheck) || (wasChangeParametersOfCheck) {
 			jsonCorrWithMarkBytes, err := json.MarshalIndent(receipt, "", "\t")
 			if err != nil {
@@ -1144,7 +1192,8 @@ func acceptMark(fptr *fptr10.IFptr) (string, error) {
 
 func listDirByReadDir(path string) ([]string, error) {
 	var spisFiles []string
-	var spisFileFD []int
+	var spisFileFD []int64
+	var spisFileNames []string
 	logstr := fmt.Sprintf("перебор файлов в директории %v--BEGIN\n", path)
 	logsmy.LogginInFile(logstr)
 	defer logsmy.LogginInFile(fmt.Sprintf("перебор файлов в директории %v--END\n", path))
@@ -1186,26 +1235,38 @@ func listDirByReadDir(path string) ([]string, error) {
 	logsmy.LogginInFile(fmt.Sprintln("spisFiles=", spisFiles))
 	for _, filename := range spisFiles {
 		fdstr := getFDFromFileName(filename)
-		fdint, err := strconv.Atoi(fdstr)
+		fdint, err := strconv.ParseInt(fdstr, 10, 64)
 		if err != nil {
-			logsmy.LogginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
-			return spisFiles, err
+			//logsmy.LogginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
+			//return spisFiles, err
 			//continue
+			spisFileNames = append(spisFileNames, fdstr)
+		} else {
+			spisFileFD = append(spisFileFD, fdint)
 		}
-		spisFileFD = append(spisFileFD, fdint)
 	}
 	var spisResOfFiles []string
-	sort.Ints(spisFileFD)
+	sort.Slice(spisFileFD, func(i, j int) bool {
+		return spisFileFD[i] < spisFileFD[j]
+	})
 	for _, fdint := range spisFileFD {
 		for _, filename := range spisFiles {
 			fdstr := getFDFromFileName(filename)
-			fdintFile, err := strconv.Atoi(fdstr)
+			fdintFile, err := strconv.ParseInt(fdstr, 10, 64)
 			if err != nil {
-				logsmy.LogginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
-				return spisFiles, err
+				//logsmy.LogginInFile(fmt.Sprintf("ошибка (%v) получения номера ФД из имени файла %v при сортировке списка файлов по номеру ФД", err, filename))
+				//return spisFiles, err
 				//continue
+			} else {
+				if fdint == fdintFile {
+					spisResOfFiles = append(spisResOfFiles, filename)
+				}
 			}
-			if fdint == fdintFile {
+		}
+	}
+	for _, fdstr := range spisFileNames {
+		for _, filename := range spisFiles {
+			if fdstr == filename {
 				spisResOfFiles = append(spisResOfFiles, filename)
 			}
 		}
@@ -1233,8 +1294,9 @@ func printedCheck(dirjsons, numerChecka string) (bool, error) {
 }
 
 func getFDFromFileName(fileNameOfJson string) string {
-	fd := ""
+	fd := filepath.Base(fileNameOfJson)
 	//7281440500811652_2333.json
+	//fmt.Println("fileNameOfJson=", fileNameOfJson)
 	indOfPodch := strings.Index(fileNameOfJson, "_")
 	if indOfPodch == -1 {
 		return fd
