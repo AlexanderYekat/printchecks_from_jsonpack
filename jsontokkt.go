@@ -145,7 +145,7 @@ func main() {
 	listOfFilesTempr, err := listDirByReadDir(consttypes.DIROFJSONS)
 	if err != nil {
 		descrError := fmt.Sprintf("ошибка (%v) поиска json заданий в директории %v", err, consttypes.DIROFJSONS)
-		logsmy.Logsmap[consttypes.LOGERROR].Printf(descrError)
+		logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
 		log.Panic(descrError)
 	}
 	logsmy.LogginInFile(fmt.Sprintln("listOfFilesTempr=", listOfFilesTempr))
@@ -155,15 +155,16 @@ func main() {
 	//убираем json-задания, которые уже были распечатаны
 	for _, v := range listOfFilesTempr {
 		currFullFileName := consttypes.DIROFJSONS + v
-		numChecka := getFDFromFileName(v)
 		printedThisCheck := false
-		if numChecka == "" {
+		if v == "" {
 			logsmy.Logsmap[consttypes.LOGERROR].Printf("пропущен файл %v", currFullFileName)
 			continue
 		}
-		printedThisCheck, _ = printedCheck(consttypes.DIROFJSONS, numChecka)
+		// Проверяем по полному имени файла (новый формат); для обратной совместимости
+		// в функции есть поддержка старого формата для файлов без символа '_'
+		printedThisCheck, _ = printedCheck(consttypes.DIROFJSONS, v)
 		if printedThisCheck {
-			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("чек с номером %v уже был распечатан", numChecka)
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("файл %v уже был распечатан", v)
 			continue
 		}
 		listOfFiles = append(listOfFiles, currFullFileName)
@@ -351,7 +352,7 @@ func main() {
 			}
 		}
 		//читаем json - задание
-		currNumIsprChecka := getFDFromFileName(currFullFileName)
+		currBaseFileName := filepath.Base(currFullFileName)
 		logsmy.LogginInFile(fmt.Sprintf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName))
 		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
 		logsmy.LogginInFile(logstr)
@@ -672,14 +673,15 @@ func main() {
 			if countPrintedChecks == 1 {
 				file_printed_checks.WriteString("\n")
 			}
-			file_printed_checks.WriteString(currNumIsprChecka + "\n")
+			// записываем базовое имя файла, чтобы исключить коллизии одинаковых номеров ФД у разных файлов
+			file_printed_checks.WriteString(currBaseFileName + "\n")
 		} else {
 			if strings.Contains(strings.ToUpper(resulOfCommand), strings.ToUpper("исчерпан")) {
 				//закрываем, открываем смену
 				checkOpenShift(fptr, true, lastNameOfKassir)
 			}
 			descrError := fmt.Sprintf("ошибка (%v) печати чека %v атол", resulOfCommand, currFullFileName)
-			logsmy.Logsmap[consttypes.LOGERROR].Printf(descrError)
+			logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
 			logsmy.LogginInFile(descrError)
 			amountOfMistakesChecks++
 		}
@@ -807,7 +809,7 @@ func CheckAndRunsCheckingMarksByCheck(fptr *fptr10.IFptr, kassatype string, rece
 					sessionkey, descrError, err = merc.CheckStatsuConnectionKKT(*emulation, *IpMerc, *PortMerc, comport, "", userint, passwuser)
 					if err != nil {
 						descrError := fmt.Sprintf("ошибка (%v) подлкючение к ККТ меркурий", descrError)
-						logsmy.Logsmap[consttypes.LOGERROR].Printf(descrError)
+						logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
 						if !*emulation {
 							globalErrorStr = descrError
 							globalMistake = true
@@ -1246,6 +1248,7 @@ func listDirByReadDir(path string) ([]string, error) {
 		}
 	}
 	var spisResOfFiles []string
+	seen := make(map[string]bool)
 	sort.Slice(spisFileFD, func(i, j int) bool {
 		return spisFileFD[i] < spisFileFD[j]
 	})
@@ -1259,7 +1262,10 @@ func listDirByReadDir(path string) ([]string, error) {
 				//continue
 			} else {
 				if fdint == fdintFile {
-					spisResOfFiles = append(spisResOfFiles, filename)
+					if !seen[filename] {
+						spisResOfFiles = append(spisResOfFiles, filename)
+						seen[filename] = true
+					}
 				}
 			}
 		}
@@ -1267,25 +1273,33 @@ func listDirByReadDir(path string) ([]string, error) {
 	for _, fdstr := range spisFileNames {
 		for _, filename := range spisFiles {
 			if fdstr == filename {
-				spisResOfFiles = append(spisResOfFiles, filename)
+				if !seen[filename] {
+					spisResOfFiles = append(spisResOfFiles, filename)
+					seen[filename] = true
+				}
 			}
 		}
 	}
 	return spisResOfFiles, nil
 } //listDirByReadDir
 
-func printedCheck(dirjsons, numerChecka string) (bool, error) {
-	//file_printed_checks, err := os.OpenFile(DIROFJSONS+"\\"+FILE_NAME_PRINTED_CHECKS, flagsTempOpen)
+func printedCheck(dirjsons, key string) (bool, error) {
+	// Проверяем как новый формат (полное имя файла), так и старый (только номер ФД)
 	res := false
 	file_printed_checks, err := os.Open(dirjsons + consttypes.FILE_NAME_PRINTED_CHECKS)
 	if err != nil {
 		return res, err
 	}
 	defer file_printed_checks.Close()
+	keyBase := filepath.Base(strings.TrimSpace(key))
+	keyFD := getFDFromFileName(keyBase)
 	sc := bufio.NewScanner(file_printed_checks)
 	for sc.Scan() {
-		fd := string(sc.Text())
-		if fd == numerChecka {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if line == keyBase || line == keyFD {
 			res = true
 			break
 		}
