@@ -60,8 +60,9 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с наличным расчетом")
 var CashMoreThan = flag.Int("cashmorethan", 0, "пропускать нал чеки с суммой большей чем указанная")
 var checkCorrectonField = flag.Bool("checkcorrectionfield", false, "проверять поле коррекции чека")
-var batchSize = flag.Int("batchsize", 1000, "размер порции файлов для загрузки")
 var openCloseShift = flag.Bool("opencloseshift", false, "открывать и закрывать смену при ошибке Ресурс хранения ФД исчерпан")
+var stopTime = flag.String("stoptime", "", "время остановки программы в формате HH:MM (например, 05:30)")
+var batchSize = flag.Int("batchsize", 1000, "размер порции файлов для загрузки")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
 
@@ -70,7 +71,7 @@ var ExlusionDate = flag.String("exldate", "", "дата исключения и�
 // Индекс для быстрой проверки напечатанных файлов
 var printedFilesIndex map[string]bool
 
-const Version_of_program = "2025_08_11_02"
+const Version_of_program = "2025_08_11_04"
 
 // FileProcessor для ленивой загрузки файлов
 type FileProcessor struct {
@@ -98,6 +99,7 @@ func NewFileProcessor(dirPath string, batchSize int) *FileProcessor {
 func (fp *FileProcessor) LoadNextBatch() ([]string, error) {
 	if fp.currentIndex >= len(fp.allFiles) {
 		// Нужно загрузить новые файлы
+		logsmy.LogginInFile("загружаем новые файлы из директории...")
 		if err := fp.loadMoreFiles(); err != nil {
 			return nil, err
 		}
@@ -116,15 +118,21 @@ func (fp *FileProcessor) LoadNextBatch() ([]string, error) {
 	batch := fp.allFiles[fp.currentIndex:endIndex]
 	fp.currentIndex = endIndex
 
+	logsmy.LogginInFile(fmt.Sprintf("обрабатываем порцию файлов: %d-%d из %d", fp.currentIndex-fp.batchSize, fp.currentIndex-1, len(fp.allFiles)))
+
 	// Фильтруем уже напечатанные файлы
 	var filteredBatch []string
+	alreadyPrintedCount := 0
 	for _, filename := range batch {
 		if !isPrintedFast(filename) {
 			filteredBatch = append(filteredBatch, fp.dirPath+filename)
 		} else {
 			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("файл %v уже был распечатан", filename)
+			alreadyPrintedCount++
 		}
 	}
+
+	logsmy.LogginInFile(fmt.Sprintf("в порции %d файлов: %d новых, %d уже напечатано", len(batch), len(filteredBatch), alreadyPrintedCount))
 
 	return filteredBatch, nil
 }
@@ -203,6 +211,7 @@ func (fp *FileProcessor) loadMoreFiles() error {
 	fmt.Println("формирование итогового списка...")
 	var spisResOfFiles []string
 	for _, fileInfo := range fileInfos {
+		// Проверяем, не добавляли ли мы уже этот файл
 		if !fp.seen[fileInfo.filename] {
 			spisResOfFiles = append(spisResOfFiles, fileInfo.filename)
 			fp.seen[fileInfo.filename] = true
@@ -210,9 +219,11 @@ func (fp *FileProcessor) loadMoreFiles() error {
 	}
 
 	fmt.Printf("добавлено новых файлов: %d\n", len(spisResOfFiles))
+	logsmy.LogginInFile(fmt.Sprintf("добавлено новых файлов: %d", len(spisResOfFiles)))
 
 	// Добавляем новые файлы к общему списку
 	fp.allFiles = append(fp.allFiles, spisResOfFiles...)
+	logsmy.LogginInFile(fmt.Sprintf("общее количество файлов в памяти: %d", len(fp.allFiles)))
 	return nil
 }
 
@@ -333,6 +344,11 @@ func main() {
 	fmt.Println(runDescription)
 	defer fmt.Println("программа версии " + Version_of_program + " распечатка чеков из json заданий остановлена")
 
+	// Выводим информацию о времени остановки, если указано
+	if *stopTime != "" {
+		fmt.Printf("Время остановки программы: %v\n", *stopTime)
+	}
+
 	//читаем параметры запуска программы
 	fmt.Println("парсинг параметров запуска программы")
 	flag.Parse()
@@ -391,7 +407,7 @@ func main() {
 
 	// Создаем процессор для ленивой загрузки файлов
 	fmt.Println("создание FileProcessor")
-	batchSize := 1000 // Размер порции файлов
+	batchSize := *batchSize // Размер порции файлов
 	fileProcessor := NewFileProcessor(consttypes.DIROFJSONS, batchSize)
 	logsmy.LogginInFile(fmt.Sprintf("инициализация FileProcessor с размером порции %v", batchSize))
 
@@ -513,23 +529,64 @@ func main() {
 	//цикл перебора json-заданий
 	prevCheckWasSuccess := false
 	fileIndex := 0
+
+	// Парсим время остановки, если указано
+	var stopTimeParsed *time.Time
+	if *stopTime != "" {
+		parsedTime, err := time.Parse("15:04", *stopTime)
+		if err != nil {
+			logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка парсинга времени остановки %v: %v", *stopTime, err)
+		} else {
+			stopTimeParsed = &parsedTime
+			logsmy.LogginInFile(fmt.Sprintf("программа будет остановлена в %v", stopTimeParsed.Format("15:04")))
+		}
+	}
+
 	for {
 		// Проверяем, нужно ли загрузить новую порцию файлов
 		if fileIndex >= len(listOfFiles) {
 			logsmy.LogginInFile("загружаем следующую порцию файлов...")
-			nextBatch, err := fileProcessor.LoadNextBatch()
-			if err != nil {
-				descrError := fmt.Sprintf("ошибка (%v) загрузки следующей порции файлов", err)
-				logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
-				break
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("загружаем следующую порцию файлов...")
+
+			// Пытаемся загрузить следующую порцию, пока не найдем нераспечатанные файлы
+			var nextBatch []string
+			var err error
+			attempts := 0
+
+			for {
+				nextBatch, err = fileProcessor.LoadNextBatch()
+				if err != nil {
+					descrError := fmt.Sprintf("ошибка (%v) загрузки следующей порции файлов", err)
+					logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
+					break
+				}
+
+				// Если получили непустую порцию, выходим из цикла
+				if len(nextBatch) > 0 {
+					break
+				}
+
+				// Если порция пустая, проверяем, есть ли еще файлы для загрузки
+				if fileProcessor.currentIndex >= len(fileProcessor.allFiles) {
+					logsmy.LogginInFile("больше файлов для обработки нет")
+					logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("больше файлов для обработки нет")
+					goto exitLoop
+				}
+
+				attempts++
+				logsmy.LogginInFile(fmt.Sprintf("попытка %d: порция пустая, загружаем следующую...", attempts))
 			}
+
 			if len(nextBatch) == 0 {
 				logsmy.LogginInFile("больше файлов для обработки нет")
+				logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("больше файлов для обработки нет")
 				break
 			}
+
 			listOfFiles = append(listOfFiles, nextBatch...)
 			countOfFiles = len(listOfFiles)
 			logsmy.LogginInFile(fmt.Sprintf("загружена новая порция: %v файлов, всего: %v", len(nextBatch), countOfFiles))
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("загружена новая порция: %v файлов, всего: %v", len(nextBatch), countOfFiles)
 		}
 
 		currFullFileName := listOfFiles[fileIndex]
@@ -582,6 +639,21 @@ func main() {
 		globalErrorStr := ""
 		command := ""
 		//проверяем условия выхода из цикла
+
+		// Проверяем время остановки
+		if stopTimeParsed != nil {
+			now := time.Now()
+			currentTime := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, now.Location())
+			stopTimeToday := time.Date(now.Year(), now.Month(), now.Day(), stopTimeParsed.Hour(), stopTimeParsed.Minute(), 0, 0, now.Location())
+
+			if currentTime.After(stopTimeToday) || currentTime.Equal(stopTimeToday) {
+				descrExit := fmt.Sprintf("достигнуто время остановки %v - завершаем работу программы", stopTimeParsed.Format("15:04"))
+				logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println(descrExit)
+				logsmy.LogginInFile(descrExit)
+				break
+			}
+		}
+
 		if amountOfMistakesChecks >= *countOfMistakesCheckForStop {
 			descrError := "превышено количество ошибок чеков, остановка работы программы"
 			logsmy.LogginInFile(descrError)
@@ -993,6 +1065,8 @@ func main() {
 			logsmy.LogginInFile(fmt.Sprintln("количество не напечатанных чеков", amountOfMistakesChecks))
 		}
 	} //перебор json заданий
+
+exitLoop:
 	//закрывес соединение с кассой меркурий если было установлено
 	if *kassatype == "merc" {
 		if sessionkey != "" {
