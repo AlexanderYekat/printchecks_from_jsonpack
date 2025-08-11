@@ -61,7 +61,7 @@ var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с н
 var CashMoreThan = flag.Int("cashmorethan", 0, "пропускать нал чеки с суммой большей чем указанная")
 var checkCorrectonField = flag.Bool("checkcorrectionfield", false, "проверять поле коррекции чека")
 var openCloseShift = flag.Bool("opencloseshift", false, "открывать и закрывать смену при ошибке Ресурс хранения ФД исчерпан")
-var stopTime = flag.String("stoptime", "", "время остановки программы в формате HH:MM (например, 05:30)")
+var stopTime = flag.String("stoptime", "", "время остановки программы в формате HH:MM (например, 05:30). Если указанное время уже прошло сегодня, программа остановится завтра в это же время")
 var batchSize = flag.Int("batchsize", 1000, "размер порции файлов для загрузки")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
@@ -71,7 +71,7 @@ var ExlusionDate = flag.String("exldate", "", "дата исключения и�
 // Индекс для быстрой проверки напечатанных файлов
 var printedFilesIndex map[string]bool
 
-const Version_of_program = "2025_08_11_04"
+const Version_of_program = "2025_08_11_05"
 
 // FileProcessor для ленивой загрузки файлов
 type FileProcessor struct {
@@ -538,7 +538,20 @@ func main() {
 			logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка парсинга времени остановки %v: %v", *stopTime, err)
 		} else {
 			stopTimeParsed = &parsedTime
-			logsmy.LogginInFile(fmt.Sprintf("программа будет остановлена в %v", stopTimeParsed.Format("15:04")))
+
+			// Проверяем, когда именно программа остановится
+			now := time.Now()
+			stopTimeToday := time.Date(now.Year(), now.Month(), now.Day(), stopTimeParsed.Hour(), stopTimeParsed.Minute(), 0, 0, now.Location())
+
+			if now.After(stopTimeToday) {
+				// Если время уже прошло сегодня, то остановимся завтра
+				tomorrow := now.AddDate(0, 0, 1)
+				stopTimeTomorrow := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), stopTimeParsed.Hour(), stopTimeParsed.Minute(), 0, 0, now.Location())
+				logsmy.LogginInFile(fmt.Sprintf("указанное время %v уже прошло сегодня, программа будет остановлена завтра в %v", stopTimeParsed.Format("15:04"), stopTimeTomorrow.Format("2006.01.02 15:04")))
+			} else {
+				// Если время еще не прошло сегодня
+				logsmy.LogginInFile(fmt.Sprintf("программа будет остановлена сегодня в %v", stopTimeParsed.Format("15:04")))
+			}
 		}
 	}
 
@@ -644,9 +657,25 @@ func main() {
 		if stopTimeParsed != nil {
 			now := time.Now()
 			currentTime := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, now.Location())
+
+			// Создаем время остановки на текущий день
 			stopTimeToday := time.Date(now.Year(), now.Month(), now.Day(), stopTimeParsed.Hour(), stopTimeParsed.Minute(), 0, 0, now.Location())
 
-			if currentTime.After(stopTimeToday) || currentTime.Equal(stopTimeToday) {
+			// Если указанное время уже прошло сегодня, то останавливаемся завтра
+			if currentTime.After(stopTimeToday) {
+				// Вычисляем время остановки на завтра
+				tomorrow := now.AddDate(0, 0, 1)
+				stopTimeTomorrow := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), stopTimeParsed.Hour(), stopTimeParsed.Minute(), 0, 0, now.Location())
+
+				// Проверяем, достигли ли мы времени остановки завтра
+				if currentTime.After(stopTimeTomorrow) || currentTime.Equal(stopTimeTomorrow) {
+					descrExit := fmt.Sprintf("достигнуто время остановки %v (завтра) - завершаем работу программы", stopTimeParsed.Format("15:04"))
+					logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println(descrExit)
+					logsmy.LogginInFile(descrExit)
+					break
+				}
+			} else if currentTime.Equal(stopTimeToday) {
+				// Если текущее время точно равно времени остановки сегодня
 				descrExit := fmt.Sprintf("достигнуто время остановки %v - завершаем работу программы", stopTimeParsed.Format("15:04"))
 				logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println(descrExit)
 				logsmy.LogginInFile(descrExit)
