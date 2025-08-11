@@ -65,7 +65,210 @@ var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секун
 
 var ExlusionDate = flag.String("exldate", "", "дата исключения из распечатки в формате 2006.01.02")
 
-const Version_of_program = "2025_08_09_01"
+// Индекс для быстрой проверки напечатанных файлов
+var printedFilesIndex map[string]bool
+
+const Version_of_program = "2025_05_14_01"
+
+// FileProcessor для ленивой загрузки файлов
+type FileProcessor struct {
+	dirPath      string
+	batchSize    int
+	currentBatch []string
+	allFiles     []string
+	currentIndex int
+	seen         map[string]bool
+}
+
+// NewFileProcessor создает новый процессор файлов
+func NewFileProcessor(dirPath string, batchSize int) *FileProcessor {
+	return &FileProcessor{
+		dirPath:      dirPath,
+		batchSize:    batchSize,
+		currentBatch: make([]string, 0),
+		allFiles:     make([]string, 0),
+		currentIndex: 0,
+		seen:         make(map[string]bool),
+	}
+}
+
+// LoadNextBatch загружает следующую порцию файлов
+func (fp *FileProcessor) LoadNextBatch() ([]string, error) {
+	if fp.currentIndex >= len(fp.allFiles) {
+		// Нужно загрузить новые файлы
+		if err := fp.loadMoreFiles(); err != nil {
+			return nil, err
+		}
+		if len(fp.allFiles) == 0 {
+			return nil, nil // Больше файлов нет
+		}
+	}
+
+	// Определяем размер текущей порции
+	endIndex := fp.currentIndex + fp.batchSize
+	if endIndex > len(fp.allFiles) {
+		endIndex = len(fp.allFiles)
+	}
+
+	// Формируем порцию
+	batch := fp.allFiles[fp.currentIndex:endIndex]
+	fp.currentIndex = endIndex
+
+	// Фильтруем уже напечатанные файлы
+	var filteredBatch []string
+	for _, filename := range batch {
+		if !isPrintedFast(filename) {
+			filteredBatch = append(filteredBatch, fp.dirPath+filename)
+		} else {
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("файл %v уже был распечатан", filename)
+		}
+	}
+
+	return filteredBatch, nil
+}
+
+// loadMoreFiles загружает новые файлы из директории
+func (fp *FileProcessor) loadMoreFiles() error {
+	lst, err := ioutil.ReadDir(fp.dirPath)
+	if err != nil {
+		return err
+	}
+
+	var spisFiles []string
+	var spisFileFD []int64
+	var spisFileNames []string
+
+	// Собираем файлы
+	for _, val := range lst {
+		if val.IsDir() {
+			continue
+		}
+		if consttypes.FILE_NAME_PRINTED_CHECKS == val.Name() {
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("пропускаем файл с информацией о напечатанных чеках")
+			continue
+		}
+		if consttypes.FILE_NAME_CONNECTION == val.Name() {
+			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("пропускаем файл с информацией о настройки связи с ККТ")
+			continue
+		}
+		spisFiles = append(spisFiles, val.Name())
+	}
+
+	// Сортируем по номеру ФД
+	for _, filename := range spisFiles {
+		fdstr := getFDFromFileName(filename)
+		fdint, err := strconv.ParseInt(fdstr, 10, 64)
+		if err != nil {
+			spisFileNames = append(spisFileNames, fdstr)
+		} else {
+			spisFileFD = append(spisFileFD, fdint)
+		}
+	}
+
+	// Сортируем по номеру ФД
+	sort.Slice(spisFileFD, func(i, j int) bool {
+		return spisFileFD[i] < spisFileFD[j]
+	})
+
+	// Формируем отсортированный список
+	var spisResOfFiles []string
+	for _, fdint := range spisFileFD {
+		for _, filename := range spisFiles {
+			fdstr := getFDFromFileName(filename)
+			fdintFile, err := strconv.ParseInt(fdstr, 10, 64)
+			if err == nil && fdint == fdintFile {
+				if !fp.seen[filename] {
+					spisResOfFiles = append(spisResOfFiles, filename)
+					fp.seen[filename] = true
+				}
+			}
+		}
+	}
+
+	// Добавляем файлы без номера ФД
+	for _, fdstr := range spisFileNames {
+		for _, filename := range spisFiles {
+			if fdstr == filename && !fp.seen[filename] {
+				spisResOfFiles = append(spisResOfFiles, filename)
+				fp.seen[filename] = true
+			}
+		}
+	}
+
+	// Добавляем новые файлы к общему списку
+	fp.allFiles = append(fp.allFiles, spisResOfFiles...)
+	return nil
+}
+
+// GetTotalFilesCount возвращает общее количество файлов (приблизительно)
+func (fp *FileProcessor) GetTotalFilesCount() int {
+	return len(fp.allFiles)
+}
+
+// initPrintedFilesIndex загружает printed.txt в память для быстрого поиска
+func initPrintedFilesIndex(dirjsons string) error {
+	printedFilesIndex = make(map[string]bool)
+
+	// Проверяем, существует ли файл printed.txt
+	if _, err := os.Stat(dirjsons + consttypes.FILE_NAME_PRINTED_CHECKS); os.IsNotExist(err) {
+		// Файл не существует, создаем пустой индекс
+		logsmy.LogginInFile("файл printed.txt не найден, создаем пустой индекс")
+		return nil
+	}
+
+	file, err := os.Open(dirjsons + consttypes.FILE_NAME_PRINTED_CHECKS)
+	if err != nil {
+		return fmt.Errorf("ошибка открытия файла printed.txt: %v", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			// Добавляем в индекс как полное имя файла, так и номер ФД для обратной совместимости
+			printedFilesIndex[line] = true
+
+			// Если это не номер ФД (содержит точку), добавляем также номер ФД
+			if strings.Contains(line, ".") {
+				fdNumber := getFDFromFileName(line)
+				if fdNumber != "" && fdNumber != line {
+					printedFilesIndex[fdNumber] = true
+				}
+			}
+			count++
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("ошибка чтения файла printed.txt: %v", err)
+	}
+
+	logsmy.LogginInFile(fmt.Sprintf("загружен индекс printed.txt: %d записей", count))
+	return nil
+}
+
+// isPrintedFast проверяет, напечатан ли файл, используя индекс в памяти (O(1))
+func isPrintedFast(filename string) bool {
+	if printedFilesIndex == nil {
+		// Индекс не инициализирован, используем старую функцию
+		return false
+	}
+
+	// Проверяем по полному имени файла
+	if printedFilesIndex[filename] {
+		return true
+	}
+
+	// Проверяем по номеру ФД для обратной совместимости
+	fdNumber := getFDFromFileName(filename)
+	if fdNumber != "" && printedFilesIndex[fdNumber] {
+		return true
+	}
+
+	return false
+}
 
 func main() {
 	var err error
@@ -132,6 +335,17 @@ func main() {
 	}
 	logsmy.LogginInFile(runDescription)
 	logsmy.LogginInFile(clearLogsDescr)
+
+	// Инициализируем индекс для быстрой проверки printed.txt
+	logsmy.LogginInFile("инициализация индекса printed.txt")
+	if err := initPrintedFilesIndex(consttypes.DIROFJSONS); err != nil {
+		descrError := fmt.Sprintf("ошибка инициализации индекса printed.txt: %v", err)
+		logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
+		println("Нажмите любую клавишу...")
+		input.Scan()
+		log.Panic(descrError)
+	}
+
 	//ищем все файлы заданий в директории json - заданий
 	consttypes.DIROFJSONS = *dirOfjsons
 	if foundedLogDir, _ := consttypes.DoesFileExist(consttypes.DIROFJSONS); !foundedLogDir {
@@ -142,35 +356,27 @@ func main() {
 		input.Scan()
 		log.Panic(descrError)
 	}
-	listOfFilesTempr, err := listDirByReadDir(consttypes.DIROFJSONS)
+	// Создаем процессор для ленивой загрузки файлов
+	batchSize := 1000 // Размер порции файлов
+	fileProcessor := NewFileProcessor(consttypes.DIROFJSONS, batchSize)
+	logsmy.LogginInFile(fmt.Sprintf("инициализация FileProcessor с размером порции %v", batchSize))
+
+	// Загружаем первую порцию файлов
+	firstBatch, err := fileProcessor.LoadNextBatch()
 	if err != nil {
-		descrError := fmt.Sprintf("ошибка (%v) поиска json заданий в директории %v", err, consttypes.DIROFJSONS)
+		descrError := fmt.Sprintf("ошибка (%v) загрузки первой порции файлов из директории %v", err, consttypes.DIROFJSONS)
 		logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
 		log.Panic(descrError)
 	}
-	logsmy.LogginInFile(fmt.Sprintln("listOfFilesTempr=", listOfFilesTempr))
+
+	logsmy.LogginInFile(fmt.Sprintf("загружена первая порция файлов: %v файлов", len(firstBatch)))
 	var listOfFiles []string
-	countOfFiles := len(listOfFilesTempr)
-	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("Всего json файлов", countOfFiles)
+	listOfFiles = append(listOfFiles, firstBatch...)
+	countOfFiles := len(listOfFiles)
+	logsmy.LogginInFile(fmt.Sprintf("Загружено файлов в первую порцию: %v", countOfFiles))
 	//убираем json-задания, которые уже были распечатаны
-	for _, v := range listOfFilesTempr {
-		currFullFileName := consttypes.DIROFJSONS + v
-		printedThisCheck := false
-		if v == "" {
-			logsmy.Logsmap[consttypes.LOGERROR].Printf("пропущен файл %v", currFullFileName)
-			continue
-		}
-		// Проверяем по полному имени файла (новый формат); для обратной совместимости
-		// в функции есть поддержка старого формата для файлов без символа '_'
-		printedThisCheck, _ = printedCheck(consttypes.DIROFJSONS, v)
-		if printedThisCheck {
-			logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("файл %v уже был распечатан", v)
-			continue
-		}
-		listOfFiles = append(listOfFiles, currFullFileName)
-		//logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("%v = %v\n", k+1, currFullFileName)
-	}
-	countOfFiles = len(listOfFiles)
+	// Фильтрация уже выполнена в LoadNextBatch
+
 	//читаем настроку com - порта в директории json - заданий
 	*comport, _ = getCurrentPortOfKass(consttypes.DIROFJSONS)
 	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("порт кассы", *comport)
@@ -260,7 +466,29 @@ func main() {
 		}
 	}
 	//цикл перебора json-заданий
-	for k, currFullFileName := range listOfFiles {
+	fileIndex := 0
+	for {
+		// Проверяем, нужно ли загрузить новую порцию файлов
+		if fileIndex >= len(listOfFiles) {
+			logsmy.LogginInFile("загружаем следующую порцию файлов...")
+			nextBatch, err := fileProcessor.LoadNextBatch()
+			if err != nil {
+				descrError := fmt.Sprintf("ошибка (%v) загрузки следующей порции файлов", err)
+				logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
+				break
+			}
+			if len(nextBatch) == 0 {
+				logsmy.LogginInFile("больше файлов для обработки нет")
+				break
+			}
+			listOfFiles = append(listOfFiles, nextBatch...)
+			countOfFiles = len(listOfFiles)
+			logsmy.LogginInFile(fmt.Sprintf("загружена новая порция: %v файлов, всего: %v", len(nextBatch), countOfFiles))
+		}
+
+		currFullFileName := listOfFiles[fileIndex]
+		fileIndex++
+
 		var receipt consttypes.TCorrectionCheck
 		//для кассы меркурий полчаем sessionkey
 		//инициализируем переменные шага цикла
@@ -353,7 +581,7 @@ func main() {
 		}
 		//читаем json - задание
 		currBaseFileName := filepath.Base(currFullFileName)
-		logsmy.LogginInFile(fmt.Sprintf("обработка задания %v из %v %v", k+1, countOfFiles, currFullFileName))
+		logsmy.LogginInFile(fmt.Sprintf("обработка задания %v из %v %v", fileIndex, countOfFiles, currFullFileName))
 		logstr := fmt.Sprintf("начинаем читать json файл %v", currFullFileName)
 		logsmy.LogginInFile(logstr)
 		jsonCorrection, err := readJsonFromFile(currFullFileName)
@@ -421,7 +649,7 @@ func main() {
 				time.Sleep(duration)
 			}
 		}
-		logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("%v: обработка задания %v из %v %v", receipt.CorrectionBaseDate, k+1, countOfFiles, currFullFileName)
+		logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Printf("%v: обработка задания %v из %v %v", receipt.CorrectionBaseDate, fileIndex, countOfFiles, currFullFileName)
 		logsmy.LogginInFile("ищем марки в чеке")
 		//очищаем таблицу марок
 		if (*clearTableOfMarks) && (previusWasMarks) {
@@ -675,6 +903,9 @@ func main() {
 			}
 			// записываем базовое имя файла, чтобы исключить коллизии одинаковых номеров ФД у разных файлов
 			file_printed_checks.WriteString(currBaseFileName + "\n")
+
+			// Обновляем индекс в памяти для быстрой проверки
+			addToPrintedIndex(currFullFileName)
 		} else {
 			if strings.Contains(strings.ToUpper(resulOfCommand), strings.ToUpper("исчерпан")) {
 				//закрываем, открываем смену
@@ -1546,3 +1777,20 @@ func checkOpenShift(fptr *fptr10.IFptr, openShiftIfClose bool, kassir string) (b
 	}
 	return true, nil
 } //checkOpenShift
+
+// addToPrintedIndex добавляет файл в индекс printed.txt
+func addToPrintedIndex(filename string) {
+	if printedFilesIndex == nil {
+		printedFilesIndex = make(map[string]bool)
+	}
+
+	// Добавляем в индекс базовое имя файла
+	baseName := filepath.Base(filename)
+	printedFilesIndex[baseName] = true
+
+	// Также добавляем номер ФД для обратной совместимости
+	fdNumber := getFDFromFileName(baseName)
+	if fdNumber != "" && fdNumber != baseName {
+		printedFilesIndex[fdNumber] = true
+	}
+}
