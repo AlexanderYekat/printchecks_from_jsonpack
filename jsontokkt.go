@@ -60,6 +60,8 @@ var pauseInSecondsAfterDay = flag.Int("pausefterdaysec", 90, "пауза в се
 var SkipCash = flag.Bool("skipcash", false, "пропускать чеки с наличным расчетом")
 var CashMoreThan = flag.Int("cashmorethan", 0, "пропускать нал чеки с суммой большей чем указанная")
 var checkCorrectonField = flag.Bool("checkcorrectionfield", false, "проверять поле коррекции чека")
+var batchSize = flag.Int("batchsize", 1000, "размер порции файлов для загрузки")
+var openCloseShift = flag.Bool("opencloseshift", false, "открывать и закрывать смену при ошибке Ресурс хранения ФД исчерпан")
 
 var dialogTimeout = flag.Int("dialog_timeout", 10, "таймаут в секундах для диалога продолжения печати чеков")
 
@@ -68,7 +70,7 @@ var ExlusionDate = flag.String("exldate", "", "дата исключения и�
 // Индекс для быстрой проверки напечатанных файлов
 var printedFilesIndex map[string]bool
 
-const Version_of_program = "2025_08_11_01"
+const Version_of_program = "2025_08_11_02"
 
 // FileProcessor для ленивой загрузки файлов
 type FileProcessor struct {
@@ -509,6 +511,7 @@ func main() {
 		}
 	}
 	//цикл перебора json-заданий
+	prevCheckWasSuccess := false
 	fileIndex := 0
 	for {
 		// Проверяем, нужно ли загрузить новую порцию файлов
@@ -916,8 +919,33 @@ func main() {
 			//mercuriy //меркурий
 			resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault, *dontprintrealfortest, *userint, *passwuser, *emulatmistakesOpenCheck)
 		}
+
+		if err != nil && *openCloseShift && strings.Contains(strings.ToUpper(resulOfCommand), strings.ToUpper("Ресурс хранения ФД исчерпан")) && prevCheckWasSuccess {
+			openShift, _ := checkOpenShift(fptr, false, lastNameOfKassir)
+			if openShift {
+				jsonOpenShift := fmt.Sprintf("{\"type\": \"closeShift\",\"operator\": {\"name\": \"%v\"}}", lastNameOfKassir)
+				_, errCloseShift := sendComandeAndGetAnswerFromKKT(fptr, jsonOpenShift)
+				if errCloseShift != nil {
+					errorDescr := fmt.Sprintf("ошбика (%v) - не удалось закрыть смену при ошибке Ресурс хранения ФД исчерпан", errCloseShift)
+					logsmy.Logsmap[consttypes.LOGERROR].Println(errorDescr)
+				}
+				checkOpenShift(fptr, true, lastNameOfKassir)
+				//печатаем чек
+				logstr = fmt.Sprintf("ещё одна попытка печати чека после того, как попробовали закрыть и открыть смену команду печати чека кассу json файл %v", jsonCorrection)
+				logsmy.LogginInFile(logstr)
+				resulOfCommand = ""
+				if *kassatype == "atol" {
+					resulOfCommand, err = sendComandeAndGetAnswerFromKKT(fptr, jsonCorrection)
+				} else {
+					//mercuriy //меркурий
+					resulOfCommand, err = merc.PrintCheck(*emulation, *IpMerc, *PortMerc, *comport, receipt, sessionkey, mercSNODefault, *dontprintrealfortest, *userint, *passwuser, *emulatmistakesOpenCheck)
+				}
+
+			}
+		}
 		//если были ошибку при печати чека, то переходим к следующему заданию
 		if err != nil {
+			prevCheckWasSuccess = false
 			errorDescr := fmt.Sprintf("ошибка (%v) печати чека %v", err, currFullFileName)
 			logsmy.Logsmap[consttypes.LOGERROR].Println(errorDescr)
 			amountOfMistakesChecks++
@@ -939,6 +967,7 @@ func main() {
 		//если команда выполнена неуспешно, то проверяем не превышен ли количество чеков в смену,
 		//и если превышено, то закрываем и открываем смену
 		if successCommand(resulOfCommand) {
+			prevCheckWasSuccess = true
 			//при успешной печати чека, записываем данные о номере напечатнного чека
 			countPrintedChecks++
 			if countPrintedChecks == 1 {
@@ -950,6 +979,7 @@ func main() {
 			// Обновляем индекс в памяти для быстрой проверки
 			addToPrintedIndex(currFullFileName)
 		} else {
+			prevCheckWasSuccess = false
 			if strings.Contains(strings.ToUpper(resulOfCommand), strings.ToUpper("исчерпан")) {
 				//закрываем, открываем смену
 				checkOpenShift(fptr, true, lastNameOfKassir)
