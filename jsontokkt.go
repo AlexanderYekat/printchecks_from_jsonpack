@@ -68,7 +68,7 @@ var ExlusionDate = flag.String("exldate", "", "дата исключения и�
 // Индекс для быстрой проверки напечатанных файлов
 var printedFilesIndex map[string]bool
 
-const Version_of_program = "2025_05_14_01"
+const Version_of_program = "2025_08_11_01"
 
 // FileProcessor для ленивой загрузки файлов
 type FileProcessor struct {
@@ -129,16 +129,17 @@ func (fp *FileProcessor) LoadNextBatch() ([]string, error) {
 
 // loadMoreFiles загружает новые файлы из директории
 func (fp *FileProcessor) loadMoreFiles() error {
+	fmt.Println("чтение директории...")
 	lst, err := ioutil.ReadDir(fp.dirPath)
 	if err != nil {
 		return err
 	}
+	fmt.Printf("найдено файлов: %d\n", len(lst))
 
 	var spisFiles []string
-	var spisFileFD []int64
-	var spisFileNames []string
 
 	// Собираем файлы
+	fmt.Println("фильтрация файлов...")
 	for _, val := range lst {
 		if val.IsDir() {
 			continue
@@ -153,47 +154,60 @@ func (fp *FileProcessor) loadMoreFiles() error {
 		}
 		spisFiles = append(spisFiles, val.Name())
 	}
+	fmt.Printf("отфильтровано файлов: %d\n", len(spisFiles))
 
-	// Сортируем по номеру ФД
+	// Создаем map для быстрой сортировки
+	fmt.Println("создание индекса для сортировки...")
+	type FileInfo struct {
+		filename string
+		fd       int64
+		hasFD    bool
+	}
+
+	var fileInfos []FileInfo
+
+	// Обрабатываем файлы за один проход
 	for _, filename := range spisFiles {
 		fdstr := getFDFromFileName(filename)
 		fdint, err := strconv.ParseInt(fdstr, 10, 64)
 		if err != nil {
-			spisFileNames = append(spisFileNames, fdstr)
+			// Файл без номера ФД
+			fileInfos = append(fileInfos, FileInfo{filename: filename, fd: 0, hasFD: false})
 		} else {
-			spisFileFD = append(spisFileFD, fdint)
+			// Файл с номером ФД
+			fileInfos = append(fileInfos, FileInfo{filename: filename, fd: fdint, hasFD: true})
 		}
 	}
 
-	// Сортируем по номеру ФД
-	sort.Slice(spisFileFD, func(i, j int) bool {
-		return spisFileFD[i] < spisFileFD[j]
+	// Сортируем файлы с номерами ФД
+	fmt.Println("сортировка файлов по номеру ФД...")
+	sort.Slice(fileInfos, func(i, j int) bool {
+		// Сначала файлы с номерами ФД, отсортированные по номеру
+		if fileInfos[i].hasFD && fileInfos[j].hasFD {
+			return fileInfos[i].fd < fileInfos[j].fd
+		}
+		// Файлы с номерами ФД идут перед файлами без номеров
+		if fileInfos[i].hasFD && !fileInfos[j].hasFD {
+			return true
+		}
+		if !fileInfos[i].hasFD && fileInfos[j].hasFD {
+			return false
+		}
+		// Файлы без номеров ФД сортируем по имени
+		return fileInfos[i].filename < fileInfos[j].filename
 	})
 
 	// Формируем отсортированный список
+	fmt.Println("формирование итогового списка...")
 	var spisResOfFiles []string
-	for _, fdint := range spisFileFD {
-		for _, filename := range spisFiles {
-			fdstr := getFDFromFileName(filename)
-			fdintFile, err := strconv.ParseInt(fdstr, 10, 64)
-			if err == nil && fdint == fdintFile {
-				if !fp.seen[filename] {
-					spisResOfFiles = append(spisResOfFiles, filename)
-					fp.seen[filename] = true
-				}
-			}
+	for _, fileInfo := range fileInfos {
+		if !fp.seen[fileInfo.filename] {
+			spisResOfFiles = append(spisResOfFiles, fileInfo.filename)
+			fp.seen[fileInfo.filename] = true
 		}
 	}
 
-	// Добавляем файлы без номера ФД
-	for _, fdstr := range spisFileNames {
-		for _, filename := range spisFiles {
-			if fdstr == filename && !fp.seen[filename] {
-				spisResOfFiles = append(spisResOfFiles, filename)
-				fp.seen[filename] = true
-			}
-		}
-	}
+	fmt.Printf("добавлено новых файлов: %d\n", len(spisResOfFiles))
 
 	// Добавляем новые файлы к общему списку
 	fp.allFiles = append(fp.allFiles, spisResOfFiles...)
@@ -277,6 +291,7 @@ func main() {
 	var fptr *fptr10.IFptr
 	var sessionkey string
 	mercSNODefault := -1
+
 	//выводим информацию о программе
 	//читаем параметры запуска программы
 	//открываем лог файлы
@@ -298,7 +313,7 @@ func main() {
 	//////перезапускаем полногстью процесс проверки марок, если были ошибки
 	//////если были ошибки при печати чека прерываем программу
 	//////пропускаем чек, если были ошибки при проверке марки
-	//////пересобираем json-задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
+	//////пересобираем json - задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
 	//////печатаем чек
 	//////если были ошибку при печати чека, то переходим к следующему заданию
 	//////эмулируем ошибку, если режим эмуляции ошибки включен
@@ -315,6 +330,7 @@ func main() {
 	runDescription := "программа версии " + Version_of_program + " распечатка чеков из json заданий запущена"
 	fmt.Println(runDescription)
 	defer fmt.Println("программа версии " + Version_of_program + " распечатка чеков из json заданий остановлена")
+
 	//читаем параметры запуска программы
 	fmt.Println("парсинг параметров запуска программы")
 	flag.Parse()
@@ -322,10 +338,17 @@ func main() {
 	fmt.Println("Уровень логирования: ", *LogsDebugs)
 	clearLogsDescr := fmt.Sprintf("Очистить логи программы %v", *clearLogsProgramm)
 	fmt.Println(clearLogsDescr)
+
 	//открываем лог файлы
 	fmt.Println("инициализация лог файлов программы")
+	startTime := time.Now()
 	input := bufio.NewScanner(os.Stdin)
+
+	fmt.Printf("вызов InitializationsLogs в %v\n", startTime.Format("15:04:05"))
 	descrMistake, err := logsmy.InitializationsLogs(*clearLogsProgramm, *LogsDebugs)
+	elapsed := time.Since(startTime)
+	fmt.Printf("InitializationsLogs завершен за %v\n", elapsed)
+
 	defer logsmy.CloseDescrptorsLogs()
 	if err != nil {
 		fmt.Fprint(os.Stderr, descrMistake)
@@ -333,10 +356,13 @@ func main() {
 		input.Scan()
 		log.Panic(descrMistake)
 	}
+
 	logsmy.LogginInFile(runDescription)
 	logsmy.LogginInFile(clearLogsDescr)
 
 	// Инициализируем индекс для быстрой проверки printed.txt
+	fmt.Println("инициализация индекса printed.txt")
+	startTime = time.Now()
 	logsmy.LogginInFile("инициализация индекса printed.txt")
 	if err := initPrintedFilesIndex(consttypes.DIROFJSONS); err != nil {
 		descrError := fmt.Sprintf("ошибка инициализации индекса printed.txt: %v", err)
@@ -345,10 +371,14 @@ func main() {
 		input.Scan()
 		log.Panic(descrError)
 	}
+	elapsed = time.Since(startTime)
+	fmt.Printf("индекс printed.txt инициализирован за %v\n", elapsed)
 
 	//ищем все файлы заданий в директории json - заданий
 	consttypes.DIROFJSONS = *dirOfjsons
+	fmt.Printf("проверка директории %v\n", consttypes.DIROFJSONS)
 	if foundedLogDir, _ := consttypes.DoesFileExist(consttypes.DIROFJSONS); !foundedLogDir {
+		fmt.Printf("создание директории %v\n", consttypes.DIROFJSONS)
 		err := os.Mkdir(consttypes.DIROFJSONS, 0777)
 		descrError := fmt.Sprintf("ошибка (%v) чтения директории %v с json заданиямию", err, consttypes.DIROFJSONS)
 		logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
@@ -356,13 +386,20 @@ func main() {
 		input.Scan()
 		log.Panic(descrError)
 	}
+
 	// Создаем процессор для ленивой загрузки файлов
+	fmt.Println("создание FileProcessor")
 	batchSize := 1000 // Размер порции файлов
 	fileProcessor := NewFileProcessor(consttypes.DIROFJSONS, batchSize)
 	logsmy.LogginInFile(fmt.Sprintf("инициализация FileProcessor с размером порции %v", batchSize))
 
 	// Загружаем первую порцию файлов
+	fmt.Println("загрузка первой порции файлов...")
+	startTime = time.Now()
 	firstBatch, err := fileProcessor.LoadNextBatch()
+	elapsed = time.Since(startTime)
+	fmt.Printf("первая порция загружена за %v\n", elapsed)
+
 	if err != nil {
 		descrError := fmt.Sprintf("ошибка (%v) загрузки первой порции файлов из директории %v", err, consttypes.DIROFJSONS)
 		logsmy.Logsmap[consttypes.LOGERROR].Println(descrError)
@@ -378,8 +415,10 @@ func main() {
 	// Фильтрация уже выполнена в LoadNextBatch
 
 	//читаем настроку com - порта в директории json - заданий
+	fmt.Println("чтение настроек COM порта")
 	*comport, _ = getCurrentPortOfKass(consttypes.DIROFJSONS)
 	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("порт кассы", *comport)
+
 	//подключаемся к кассовому аппарату
 	if *kassatype == "atol" {
 		logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("Тип кассы atol")
@@ -434,6 +473,7 @@ func main() {
 		merc.Closesession(*IpMerc, *PortMerc, &sessionkey)
 	}
 	//открытие для запиписи файла напечатанных чеков
+	fmt.Println("открытие файла напечатанных чеков")
 	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("отрытие для записи таблицы напечатанных чеков")
 	flagsTempOpen := os.O_APPEND | os.O_CREATE | os.O_WRONLY
 	file_printed_checks, err := os.OpenFile(consttypes.DIROFJSONS+consttypes.FILE_NAME_PRINTED_CHECKS, flagsTempOpen, 0644)
@@ -445,6 +485,9 @@ func main() {
 		log.Panic("ошибка инициализации напечтанных файла чеков", descrError)
 	}
 	defer file_printed_checks.Close()
+
+	fmt.Println("инициализация завершена, начинаем основной цикл")
+
 	//инициализация переменных для цикла перебора json-заданий
 	countPrintedChecks := 0
 	amountOfMistakesChecks := 0
@@ -455,8 +498,8 @@ func main() {
 		logsmy.Logsmap[consttypes.LOGERROR].Printf("ошибка (%v) инициализации начальной даты", err)
 	}
 	prevDateOfCheck := initDate
-	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("начинаем выполнять json чеков", countOfFiles)
-	logsmy.Logsmap[consttypes.LOGINFO_WITHSTD].Println("всего json заданий для печати чека", countOfFiles)
+	logsmy.LogginInFile(fmt.Sprintf("начинаем выполнять json чеков", countOfFiles))
+	logsmy.LogginInFile(fmt.Sprintf("всего json заданий для печати чека", countOfFiles))
 	previusWasMarks := false
 	if *ExlusionDate != "" {
 		ExlusionDateDate, err = time.Parse("2006.01.02", *ExlusionDate)
@@ -502,7 +545,7 @@ func main() {
 		//перезапускаем полногстью процесс проверки марок, если были ошибки
 		//если были ошибки при печати чека прерываем программу
 		//пропускаем чек, если были ошибки при проверке марки
-		//пересобираем json-задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
+		//пересобираем json - задание, если необходимо (вставляем результаты проверки марок, изменяем параметры печати/не печати и email)
 		//печатаем чек
 		//если были ошибку при печати чека, то переходим к следующему заданию
 		//эмулируем ошибку, если режим эмуляции ошибки включен

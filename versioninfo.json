@@ -3,13 +3,13 @@
 		"FileVersion": {
 			"Major": 2025,
 			"Minor": 8,
-			"Patch": 9,
+			"Patch": 11,
 			"Build": 1
 		},
 		"ProductVersion": {
 			"Major": 2025,
 			"Minor": 8,
-			"Patch": 9,
+			"Patch": 11,
 			"Build": 1
 		},
 		"FileFlagsMask": "3f",
@@ -29,7 +29,7 @@
 		"OriginalFilename": "jsontokkt.exe",
 		"PrivateBuild": "",
 		"ProductName": "",
-		"ProductVersion": "v2025.08.09.01",
+		"ProductVersion": "v2025.08.11.01",
 		"SpecialBuild": ""
 	},
 	"VarFileInfo": {

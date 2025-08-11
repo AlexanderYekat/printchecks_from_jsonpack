@@ -1,6 +1,10 @@
 package consttypes
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"time"
+)
 
 type TShiftInfoMerc struct {
 	IsOpen      bool `json:"isOpen"`
@@ -316,7 +320,25 @@ const FILE_NAME_CONNECTION = "connection.txt"
 
 func DoesFileExist(fullFileName string) (found bool, err error) {
 	found = false
-	if _, err = os.Stat(fullFileName); err == nil {
+
+	// Добавляем таймаут для операции проверки файла
+	done := make(chan bool, 1)
+	var statErr error
+
+	go func() {
+		_, statErr = os.Stat(fullFileName)
+		done <- true
+	}()
+
+	// Ждем максимум 3 секунды
+	select {
+	case <-done:
+		// Операция завершена
+	case <-time.After(3 * time.Second):
+		return false, fmt.Errorf("таймаут проверки файла %v", fullFileName)
+	}
+
+	if statErr == nil {
 		// path/to/whatever exists
 		found = true
 	}
